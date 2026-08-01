@@ -1,5 +1,11 @@
 package jp.oboegaki.ui
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -11,6 +17,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.BottomAppBar
 import androidx.compose.material.BottomNavigationItem
 import androidx.compose.material.Button
+import androidx.compose.material.FabPosition
 import androidx.compose.material.FloatingActionButton
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Scaffold
@@ -34,9 +41,11 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
 import jp.oboegaki.core.data.BuiltInThemes
 import jp.oboegaki.core.data.ItemRepository
+import jp.oboegaki.core.model.AddButtonPosition
 import jp.oboegaki.platform.CalendarExporter
 import jp.oboegaki.platform.NoOpCalendarExporter
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 @Composable
 fun OboegakiApp(
@@ -57,6 +66,11 @@ fun OboegakiApp(
     val theme = themes.firstOrNull { it.id == settings.selectedThemeId } ?: BuiltInThemes.standard
     val icons = theme.icons
     val tabSwipeThreshold = with(LocalDensity.current) { 56.dp.toPx() }
+    val tabTransitionDuration = if (settings.reducedMotion) {
+        1
+    } else {
+        (220 * theme.animationScale).roundToInt().coerceAtLeast(1)
+    }
     val hapticFeedback = LocalHapticFeedback.current
 
     fun performHapticFeedback() {
@@ -107,35 +121,66 @@ fun OboegakiApp(
                         Text(icons.add, style = MaterialTheme.typography.h5)
                     }
                 },
+                floatingActionButtonPosition = if (settings.addButtonPosition == AddButtonPosition.LEFT) {
+                    FabPosition.Start
+                } else {
+                    FabPosition.End
+                },
                 isFloatingActionButtonDocked = false,
             ) { padding ->
                 Box(
                     Modifier
                         .fillMaxSize()
                         .padding(padding)
-                        .detectUnconsumedHorizontalSwipe(
+                        .detectHorizontalTabSwipe(
                             enabled = settings.tabSwipeEnabled,
                             thresholdPx = tabSwipeThreshold,
+                            allowChildConsumption = tab == MainTab.ALL,
                         ) { forward ->
                             if (controller.selectAdjacentTab(forward)) {
                                 performHapticFeedback()
                             }
                         },
                 ) {
-                    when (tab) {
-                        MainTab.TODOS -> TodoScreen(
-                            sections.todos,
-                            todoIndex,
-                            settings.hapticsEnabled,
-                            controller,
-                        )
-                        MainTab.MEMOS -> MemoScreen(
-                            sections.memos,
-                            memoIndex,
-                            settings.hapticsEnabled,
-                            controller,
-                        )
-                        MainTab.ALL -> AllItemsScreen(sections, controller)
+                    AnimatedContent(
+                        targetState = tab,
+                        transitionSpec = {
+                            val enterFromRight = targetState.ordinal > initialState.ordinal
+                            if (enterFromRight) {
+                                slideInHorizontally(
+                                    animationSpec = tween(tabTransitionDuration, easing = LinearEasing),
+                                    initialOffsetX = { it },
+                                ) togetherWith slideOutHorizontally(
+                                    animationSpec = tween(tabTransitionDuration, easing = LinearEasing),
+                                    targetOffsetX = { -it },
+                                )
+                            } else {
+                                slideInHorizontally(
+                                    animationSpec = tween(tabTransitionDuration, easing = LinearEasing),
+                                    initialOffsetX = { -it },
+                                ) togetherWith slideOutHorizontally(
+                                    animationSpec = tween(tabTransitionDuration, easing = LinearEasing),
+                                    targetOffsetX = { it },
+                                )
+                            }
+                        },
+                        label = "main-tab-transition",
+                    ) { targetTab ->
+                        when (targetTab) {
+                            MainTab.TODOS -> TodoScreen(
+                                sections.todos,
+                                todoIndex,
+                                settings.hapticsEnabled,
+                                controller,
+                            )
+                            MainTab.MEMOS -> MemoScreen(
+                                sections.memos,
+                                memoIndex,
+                                settings.hapticsEnabled,
+                                controller,
+                            )
+                            MainTab.ALL -> AllItemsScreen(sections, controller)
+                        }
                     }
                     undo?.let {
                         UndoBar(
@@ -157,18 +202,19 @@ fun OboegakiApp(
 }
 
 /**
- * Detects a horizontal swipe only when no child consumed the gesture. This lets
- * blank screen areas change tabs without stealing card swipes, list scrolling,
- * button taps, or drag-to-reorder gestures from their owning components.
+ * Detects horizontal tab swipes without stealing the card gestures on the
+ * やること and メモ screens. The すべて screen owns a LazyColumn, so its child
+ * consumption is deliberately allowed after horizontal intent is confirmed.
  */
-private fun Modifier.detectUnconsumedHorizontalSwipe(
+private fun Modifier.detectHorizontalTabSwipe(
     enabled: Boolean,
     thresholdPx: Float,
+    allowChildConsumption: Boolean,
     onSwipe: (forward: Boolean) -> Unit,
 ): Modifier = if (!enabled) {
     this
 } else {
-    pointerInput(enabled, thresholdPx) {
+    pointerInput(enabled, thresholdPx, allowChildConsumption) {
         awaitEachGesture {
             val down = awaitFirstDown(
                 requireUnconsumed = false,
@@ -189,7 +235,7 @@ private fun Modifier.detectUnconsumedHorizontalSwipe(
                 if (!change.pressed) {
                     val horizontalEnough = abs(horizontalDistance) >= thresholdPx
                     val horizontalIntent = abs(horizontalDistance) > abs(verticalDistance) * 1.25f
-                    if (!consumedByChild && horizontalEnough && horizontalIntent) {
+                    if ((allowChildConsumption || !consumedByChild) && horizontalEnough && horizontalIntent) {
                         onSwipe(horizontalDistance < 0f)
                     }
                     break

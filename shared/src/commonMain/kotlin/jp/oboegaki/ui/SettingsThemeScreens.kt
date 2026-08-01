@@ -3,6 +3,7 @@ package jp.oboegaki.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -37,8 +38,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import jp.oboegaki.core.domain.ThemePolicy
 import jp.oboegaki.core.model.AppearanceMode
+import jp.oboegaki.core.model.AddButtonPosition
 import jp.oboegaki.core.model.AppSettings
 import jp.oboegaki.core.model.MotionStrength
 import jp.oboegaki.core.model.ThemeColors
@@ -60,6 +63,25 @@ fun SettingsScreen(settings: AppSettings, controller: AppController) {
             item { SectionTitle("操作") }
             item { SettingSwitch("触覚フィードバック", draft.hapticsEnabled) { draft = draft.copy(hapticsEnabled = it) } }
             item { SettingSwitch("Enterで追加", draft.addWithEnter) { draft = draft.copy(addWithEnter = it) } }
+            item {
+                Text("追加ボタンの位置", style = MaterialTheme.typography.subtitle1)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    AddButtonPosition.values().forEach { position ->
+                        val label = if (position == AddButtonPosition.LEFT) "左下" else "右下"
+                        if (draft.addButtonPosition == position) {
+                            Button(
+                                onClick = { draft = draft.copy(addButtonPosition = position) },
+                                modifier = Modifier.weight(1f).height(48.dp),
+                            ) { Text(label) }
+                        } else {
+                            OutlinedButton(
+                                onClick = { draft = draft.copy(addButtonPosition = position) },
+                                modifier = Modifier.weight(1f).height(48.dp),
+                            ) { Text(label) }
+                        }
+                    }
+                }
+            }
             item {
                 SettingSwitch("空きスペースの左右スワイプで画面を切り替える", draft.tabSwipeEnabled) {
                     draft = draft.copy(tabSwipeEnabled = it)
@@ -149,8 +171,12 @@ fun OperationGuideScreen(firstLaunch: Boolean, controller: AppController) {
                         style = MaterialTheme.typography.h5,
                     )
                     Text(
-                        if (firstLaunch) "最初は空の状態です。思いついた内容を、やること・メモ・あとで分ける項目として追加できます。"
-                        else "スワイプとボタンの使い方をいつでも確認できます。",
+                        if (firstLaunch) {
+                            "最初は、何も登録されていない空の状態です。\n\n思いついた内容は、種類を決めずに追加することもできます。"
+                        } else {
+                            "基本の操作を、項目ごとに確認できます。\n\nこのガイドは設定からいつでも開けます。"
+                        },
+                        style = MaterialTheme.typography.body1.copy(lineHeight = 23.sp),
                         color = parseColor(LocalThemeColors.current.textSecondary),
                     )
                 }
@@ -158,35 +184,55 @@ fun OperationGuideScreen(firstLaunch: Boolean, controller: AppController) {
                     GuideStep(
                         icon = icons.add,
                         title = "まず追加する",
-                        body = "画面右下の追加ボタンを押します。ハンドルを上へ引くとやることの詳細が開き、下へ引くと閉じます。",
+                        points = listOf(
+                            "画面左下の追加ボタンを押します。",
+                            "追加ボタンは、設定から右下へ移動できます。",
+                            "ハンドルを上へ引くと詳細が開き、下へ引くと閉じます。",
+                        ),
                     )
                 }
                 item {
                     GuideStep(
                         icon = "${icons.previous} ${icons.next}",
                         title = "カードを上下に動かす",
-                        body = "上へスワイプすると次へ、下へスワイプすると前へ移動します。前後のカードも指に合わせて動きます。",
+                        points = listOf(
+                            "上へスワイプ：次の項目へ移動",
+                            "下へスワイプ：前の項目へ移動",
+                            "前後のカードも指に合わせて動きます。",
+                        ),
                     )
                 }
                 item {
                     GuideStep(
                         icon = "${icons.defer}  ${icons.complete}",
                         title = "左右で整理する",
-                        body = "やることは左で後で行う、右で完了です。メモは左でしまう、右でやることにします。操作は元に戻せます。",
+                        points = listOf(
+                            "やること　左：後で行う ／ 右：完了",
+                            "メモ　　　左：しまう ／ 右：やることにする",
+                            "操作後は「元に戻す」が使えます。",
+                        ),
                     )
                 }
                 item {
                     GuideStep(
                         icon = "${icons.todo}  ${icons.memo}  ${icons.all}",
                         title = "画面を切り替える",
-                        body = "下の項目をタップするか、設定を有効にして空きスペースを左右へスワイプします。すべて画面から編集・並べ替え・復元ができます。",
+                        points = listOf(
+                            "画面下の項目をタップして切り替えます。",
+                            "設定を有効にすると、空きスペースの左右スワイプでも切り替えられます。",
+                            "「すべて」では、編集・並べ替え・復元ができます。",
+                        ),
                     )
                 }
                 item {
                     GuideStep(
                         icon = "${icons.theme}  ${icons.settings}",
                         title = "外観と操作を調整する",
-                        body = "すべて画面のテーマと設定から、色・フォント・アイコン・動き・触覚などを変更できます。このガイドも設定から見返せます。",
+                        points = listOf(
+                            "「すべて」画面から、テーマと設定を開けます。",
+                            "色・フォント・アイコン・動き・触覚などを変更できます。",
+                            "このガイドも設定から見返せます。",
+                        ),
                     )
                     Spacer(Modifier.height(20.dp))
                 }
@@ -200,19 +246,30 @@ fun OperationGuideScreen(firstLaunch: Boolean, controller: AppController) {
 }
 
 @Composable
-private fun GuideStep(icon: String, title: String, body: String) {
+private fun GuideStep(icon: String, title: String, points: List<String>) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(LocalAppTheme.current.mediumCornerDp.dp),
         elevation = 1.dp,
         backgroundColor = parseColor(LocalThemeColors.current.surface),
     ) {
-        Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(icon, style = MaterialTheme.typography.h5, modifier = Modifier.width(74.dp), textAlign = TextAlign.Center)
-            Column(Modifier.weight(1f)) {
+        Column(Modifier.fillMaxWidth().padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(icon, style = MaterialTheme.typography.h5, modifier = Modifier.width(64.dp), textAlign = TextAlign.Center)
                 Text(title, style = MaterialTheme.typography.subtitle1, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(4.dp))
-                Text(body, style = MaterialTheme.typography.body2, color = parseColor(LocalThemeColors.current.textSecondary))
+            }
+            Spacer(Modifier.height(10.dp))
+            points.forEach { point ->
+                Row(Modifier.fillMaxWidth()) {
+                    Text("•", modifier = Modifier.width(22.dp), textAlign = TextAlign.Center)
+                    Text(
+                        point,
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.body2.copy(lineHeight = 21.sp),
+                        color = parseColor(LocalThemeColors.current.textSecondary),
+                    )
+                }
+                Spacer(Modifier.height(5.dp))
             }
         }
     }
@@ -220,16 +277,49 @@ private fun GuideStep(icon: String, title: String, body: String) {
 
 @Composable
 fun ThemeListScreen(themes: List<ThemeDefinition>, settings: AppSettings, controller: AppController) {
+    val systemDark = isSystemInDarkTheme()
+    val darkVariant = when (settings.appearanceMode) {
+        AppearanceMode.SYSTEM -> systemDark
+        AppearanceMode.LIGHT -> false
+        AppearanceMode.DARK -> true
+    }
     OverlayScaffold("テーマ", controller::closeOverlay) { padding ->
         LazyColumn(
             Modifier.fillMaxSize().padding(padding),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             item {
-                Text("現在の外観を選び、複製すると色や文字、形、余白、影、動きを編集できます。")
+                Text("表示を切り替えると、組み込みテーマを含む画面全体と見本がすぐに変わります。")
+                Spacer(Modifier.height(8.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    AppearanceMode.values().forEach { mode ->
+                        val label = when (mode) {
+                            AppearanceMode.SYSTEM -> "端末"
+                            AppearanceMode.LIGHT -> "明るい"
+                            AppearanceMode.DARK -> "暗い"
+                        }
+                        if (settings.appearanceMode == mode) {
+                            Button(
+                                onClick = { controller.setAppearanceMode(mode) },
+                                modifier = Modifier.weight(1f).height(48.dp),
+                            ) { Text(label) }
+                        } else {
+                            OutlinedButton(
+                                onClick = { controller.setAppearanceMode(mode) },
+                                modifier = Modifier.weight(1f).height(48.dp),
+                            ) { Text(label) }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "現在の見本：${if (darkVariant) "暗い表示" else "明るい表示"}",
+                    style = MaterialTheme.typography.caption,
+                    color = parseColor(LocalThemeColors.current.textSecondary),
+                )
             }
             items(themes, key = { it.id }) { theme ->
-                ThemeListCard(theme, theme.id == settings.selectedThemeId, controller)
+                ThemeListCard(theme, theme.id == settings.selectedThemeId, darkVariant, controller)
             }
             item {
                 val base = themes.firstOrNull { it.id == settings.selectedThemeId } ?: themes.first()
@@ -243,8 +333,13 @@ fun ThemeListScreen(themes: List<ThemeDefinition>, settings: AppSettings, contro
 }
 
 @Composable
-private fun ThemeListCard(theme: ThemeDefinition, selected: Boolean, controller: AppController) {
-    val colors = theme.light
+private fun ThemeListCard(
+    theme: ThemeDefinition,
+    selected: Boolean,
+    darkVariant: Boolean,
+    controller: AppController,
+) {
+    val colors = if (darkVariant) theme.dark else theme.light
     Card(
         Modifier.fillMaxWidth().clickable { controller.applyTheme(theme.id) },
         shape = RoundedCornerShape(theme.mediumCornerDp.dp),
@@ -267,7 +362,11 @@ private fun ThemeListCard(theme: ThemeDefinition, selected: Boolean, controller:
                         fontFamily = themeFontFamily(theme.fontFamily),
                     )
                     Text(
-                        if (theme.builtIn) "組み込み・複製して編集" else "${theme.fontFamily}・カスタム",
+                        if (theme.builtIn) {
+                            "組み込み・${if (darkVariant) "暗い表示" else "明るい表示"}"
+                        } else {
+                            "${theme.fontFamily}・カスタム・${if (darkVariant) "暗い表示" else "明るい表示"}"
+                        },
                         color = parseColor(colors.textSecondary),
                         style = MaterialTheme.typography.caption,
                         fontFamily = themeFontFamily(theme.fontFamily),

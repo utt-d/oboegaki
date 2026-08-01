@@ -6,6 +6,7 @@ import jp.oboegaki.core.domain.MoveDecision
 import jp.oboegaki.core.domain.SplitValidation
 import jp.oboegaki.core.domain.ThemeValidation
 import jp.oboegaki.core.model.AllSections
+import jp.oboegaki.core.model.AppearanceMode
 import jp.oboegaki.core.model.AppItem
 import jp.oboegaki.core.model.AppSettings
 import jp.oboegaki.core.model.ItemKind
@@ -247,6 +248,10 @@ class AppController(
         repository.saveSettings(value)
         closeOverlay()
         showMessage("設定を保存しました")
+    }
+
+    fun setAppearanceMode(mode: AppearanceMode) = scope.launch {
+        repository.saveSettings(_settings.value.copy(appearanceMode = mode))
     }
 
     fun applyTheme(themeId: String) = scope.launch {

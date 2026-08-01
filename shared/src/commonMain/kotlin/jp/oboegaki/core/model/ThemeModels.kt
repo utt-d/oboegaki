@@ -9,6 +9,9 @@ enum class AppearanceMode { SYSTEM, LIGHT, DARK }
 enum class MotionStrength { NONE, GENTLE, STANDARD, STRONG }
 
 @Serializable
+enum class AddButtonPosition { LEFT, RIGHT }
+
+@Serializable
 data class ThemeColors(
     val background: String,
     val surface: String,
@@ -85,6 +88,7 @@ data class AppSettings(
     val hapticsEnabled: Boolean = true,
     val undoSeconds: Int = 5,
     val addWithEnter: Boolean = false,
+    val addButtonPosition: AddButtonPosition = AddButtonPosition.LEFT,
     val tabSwipeEnabled: Boolean = true,
     val calendarIntegrationEnabled: Boolean = true,
     val reducedMotion: Boolean = false,
