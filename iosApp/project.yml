@@ -1,0 +1,30 @@
+name: Oboegaki
+options:
+  createIntermediateGroups: true
+  deploymentTarget:
+    iOS: "16.0"
+settings:
+  base:
+    PRODUCT_NAME: Oboegaki
+    PRODUCT_BUNDLE_IDENTIFIER: jp.oboegaki.app
+    MARKETING_VERSION: 0.1.0
+    CURRENT_PROJECT_VERSION: 1
+    SWIFT_VERSION: 5.0
+targets:
+  iosApp:
+    type: application
+    platform: iOS
+    sources:
+      - path: iosApp
+    settings:
+      base:
+        INFOPLIST_FILE: iosApp/Info.plist
+        FRAMEWORK_SEARCH_PATHS: "$(inherited) $(SRCROOT)/../shared/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)"
+        OTHER_LDFLAGS: "$(inherited) -framework Shared"
+        CODE_SIGN_STYLE: Automatic
+    preBuildScripts:
+      - name: Build shared Kotlin framework
+        basedOnDependencyAnalysis: false
+        script: |
+          cd "$SRCROOT/.."
+          ./gradlew :shared:embedAndSignAppleFrameworkForXcode

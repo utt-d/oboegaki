@@ -1,0 +1,364 @@
+package jp.oboegaki.ui
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.Button
+import androidx.compose.material.Card
+import androidx.compose.material.Divider
+import androidx.compose.material.MaterialTheme
+import androidx.compose.material.OutlinedButton
+import androidx.compose.material.OutlinedTextField
+import androidx.compose.material.Slider
+import androidx.compose.material.Switch
+import androidx.compose.material.Text
+import androidx.compose.material.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import jp.oboegaki.core.domain.ThemePolicy
+import jp.oboegaki.core.model.AppearanceMode
+import jp.oboegaki.core.model.AppSettings
+import jp.oboegaki.core.model.MotionStrength
+import jp.oboegaki.core.model.ThemeColors
+import jp.oboegaki.core.model.ThemeDefinition
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import kotlin.math.roundToInt
+
+@Composable
+fun SettingsScreen(settings: AppSettings, controller: AppController) {
+    var draft by remember(settings) { mutableStateOf(settings) }
+    OverlayScaffold("設定", controller::closeOverlay, action = {
+        TextButton(onClick = { controller.saveSettings(draft) }, modifier = Modifier.height(48.dp)) { Text("保存") }
+    }) { padding ->
+        LazyColumn(
+            Modifier.fillMaxSize().padding(padding),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            item { SectionTitle("操作") }
+            item { SettingSwitch("触覚フィードバック", draft.hapticsEnabled) { draft = draft.copy(hapticsEnabled = it) } }
+            item { SettingSwitch("Enterで追加", draft.addWithEnter) { draft = draft.copy(addWithEnter = it) } }
+            item {
+                SettingSwitch("空きスペースの左右スワイプで画面を切り替える", draft.tabSwipeEnabled) {
+                    draft = draft.copy(tabSwipeEnabled = it)
+                }
+            }
+            item {
+                ValueSlider("元に戻す表示", "${draft.undoSeconds}秒", draft.undoSeconds.toFloat(), 3f..10f, 6) {
+                    draft = draft.copy(undoSeconds = it.roundToInt())
+                }
+            }
+            item { SectionTitle("後で行う") }
+            item {
+                ValueSlider("何件後に再表示", "${draft.deferItems}件後", draft.deferItems.toFloat(), 1f..20f, 18) {
+                    draft = draft.copy(deferItems = it.roundToInt())
+                }
+            }
+            item {
+                SettingSwitch("何度も後で行うと、小さく分ける提案を表示", draft.splitSuggestionEnabled) {
+                    draft = draft.copy(splitSuggestionEnabled = it)
+                }
+            }
+            item {
+                ValueSlider("提案する回数", "${draft.splitThreshold}回", draft.splitThreshold.toFloat(), 1f..10f, 8) {
+                    draft = draft.copy(splitThreshold = it.roundToInt())
+                }
+            }
+            item { SectionTitle("カレンダー連携") }
+            item {
+                SettingSwitch("やることを端末のカレンダーへ追加できるようにする", draft.calendarIntegrationEnabled) {
+                    draft = draft.copy(calendarIntegrationEnabled = it)
+                }
+                Text(
+                    "Google カレンダー、Outlookなど、端末に設定されたカレンダーを利用します。追加先の選択方法は端末により異なり、自動同期は行いません。",
+                    style = MaterialTheme.typography.caption,
+                    color = parseColor(LocalThemeColors.current.textSecondary),
+                )
+            }
+            item { SectionTitle("表示") }
+            item {
+                Text("外観モード", style = MaterialTheme.typography.subtitle1)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    AppearanceMode.values().forEach { mode ->
+                        val label = when (mode) {
+                            AppearanceMode.SYSTEM -> "端末"
+                            AppearanceMode.LIGHT -> "明るい"
+                            AppearanceMode.DARK -> "暗い"
+                        }
+                        if (draft.appearanceMode == mode) Button(onClick = { draft = draft.copy(appearanceMode = mode) }, Modifier.weight(1f).height(48.dp)) { Text(label) }
+                        else OutlinedButton(onClick = { draft = draft.copy(appearanceMode = mode) }, Modifier.weight(1f).height(48.dp)) { Text(label) }
+                    }
+                }
+            }
+            item { SettingSwitch("動きを減らす", draft.reducedMotion) { draft = draft.copy(reducedMotion = it) } }
+            item {
+                Divider()
+                Spacer(Modifier.height(12.dp))
+                OutlinedButton(onClick = controller::openThemes, Modifier.fillMaxWidth().height(48.dp)) { Text("テーマを選ぶ・編集する") }
+                OutlinedButton(onClick = controller::openDataTools, Modifier.fillMaxWidth().height(48.dp)) { Text("データのバックアップ") }
+                Spacer(Modifier.height(80.dp))
+            }
+        }
+    }
+}
+
+@Composable
+fun ThemeListScreen(themes: List<ThemeDefinition>, settings: AppSettings, controller: AppController) {
+    OverlayScaffold("テーマ", controller::closeOverlay) { padding ->
+        LazyColumn(
+            Modifier.fillMaxSize().padding(padding),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            item {
+                Text("現在の外観を選び、複製すると色や文字、形、余白、影、動きを編集できます。")
+            }
+            items(themes, key = { it.id }) { theme ->
+                ThemeListCard(theme, theme.id == settings.selectedThemeId, controller)
+            }
+            item {
+                val base = themes.firstOrNull { it.id == settings.selectedThemeId } ?: themes.first()
+                Button(onClick = { controller.duplicateTheme(base.copy(name = "新しいテーマ")) }, Modifier.fillMaxWidth().height(52.dp)) {
+                    Text("新規テーマを作る")
+                }
+                Spacer(Modifier.height(80.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun ThemeListCard(theme: ThemeDefinition, selected: Boolean, controller: AppController) {
+    val colors = theme.light
+    Card(
+        Modifier.fillMaxWidth().clickable { controller.applyTheme(theme.id) },
+        shape = RoundedCornerShape(theme.mediumCornerDp.dp),
+        elevation = if (selected) 6.dp else 1.dp,
+        backgroundColor = parseColor(colors.surface),
+    ) {
+        Column(Modifier.padding(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    listOf(colors.accent, colors.todo, colors.memo, colors.success).forEach {
+                        Box(Modifier.width(18.dp).height(36.dp).background(parseColor(it), RoundedCornerShape(4.dp)))
+                    }
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(theme.name, color = parseColor(colors.textPrimary), fontWeight = FontWeight.Bold)
+                    Text(if (theme.builtIn) "組み込み・複製して編集" else "カスタム", color = parseColor(colors.textSecondary), style = MaterialTheme.typography.caption)
+                }
+                Text(if (selected) "適用中 ✓" else "選ぶ", color = parseColor(colors.accent))
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = { controller.duplicateTheme(theme) }) { Text("複製") }
+                if (!theme.builtIn) {
+                    TextButton(onClick = { controller.openThemeEditor(theme) }) { Text("編集") }
+                    TextButton(onClick = { controller.deleteTheme(theme.id) }) { Text("削除", color = MaterialTheme.colors.error) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ThemeEditorScreen(source: ThemeDefinition, controller: AppController) {
+    var draft by remember(source.id) { mutableStateOf(source.copy(builtIn = false)) }
+    var darkVariant by remember { mutableStateOf(false) }
+    var jsonText by remember(source.id) { mutableStateOf("") }
+    var showJson by remember { mutableStateOf(false) }
+    val codec = remember { Json { prettyPrint = true; ignoreUnknownKeys = true; encodeDefaults = true } }
+    val colors = if (darkVariant) draft.dark else draft.light
+
+    fun updateColors(value: ThemeColors) {
+        draft = if (darkVariant) draft.copy(dark = value) else draft.copy(light = value)
+    }
+
+    OverlayScaffold("テーマを編集", controller::closeOverlay, action = {
+        TextButton(onClick = { controller.saveTheme(draft) }, modifier = Modifier.height(48.dp)) { Text("保存") }
+    }) { padding ->
+        LazyColumn(
+            Modifier.fillMaxSize().padding(padding),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            item {
+                OutlinedTextField(draft.name, { draft = draft.copy(name = it.take(50)) }, Modifier.fillMaxWidth(), label = { Text("テーマ名") })
+                Spacer(Modifier.height(10.dp))
+                LiveThemePreview(draft, colors)
+            }
+            item {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (!darkVariant) Button(onClick = { darkVariant = false }, Modifier.weight(1f)) { Text("明るい配色") }
+                    else OutlinedButton(onClick = { darkVariant = false }, Modifier.weight(1f)) { Text("明るい配色") }
+                    if (darkVariant) Button(onClick = { darkVariant = true }, Modifier.weight(1f)) { Text("暗い配色") }
+                    else OutlinedButton(onClick = { darkVariant = true }, Modifier.weight(1f)) { Text("暗い配色") }
+                }
+            }
+            item { SectionTitle("色") }
+            item {
+                ColorField("背景", colors.background) { updateColors(colors.copy(background = it)) }
+                ColorField("カード", colors.surface) { updateColors(colors.copy(surface = it)) }
+                ColorField("補助面", colors.surfaceAlt) { updateColors(colors.copy(surfaceAlt = it)) }
+                ColorField("主な文字", colors.textPrimary) { updateColors(colors.copy(textPrimary = it)) }
+                ColorField("補助文字", colors.textSecondary) { updateColors(colors.copy(textSecondary = it)) }
+                ColorField("主操作", colors.accent) { updateColors(colors.copy(accent = it)) }
+                ColorField("主操作上の文字", colors.onAccent) { updateColors(colors.copy(onAccent = it)) }
+                ColorField("やること", colors.todo) { updateColors(colors.copy(todo = it)) }
+                ColorField("メモ", colors.memo) { updateColors(colors.copy(memo = it)) }
+                ColorField("完了", colors.success) { updateColors(colors.copy(success = it)) }
+                ColorField("後で行う", colors.defer) { updateColors(colors.copy(defer = it)) }
+                val primaryRatio = ThemePolicy.contrast(colors.textPrimary, colors.background)
+                Text("主な文字のコントラスト ${formatRatio(primaryRatio)} : 1（推奨 4.5 : 1）", color = if (primaryRatio < 4.5) parseColor(colors.warning) else parseColor(colors.success))
+            }
+            item { SectionTitle("文字・形・余白・影") }
+            item {
+                ValueSlider("文字倍率", formatTwo(draft.fontScale), draft.fontScale, .85f..1.30f, 8) { draft = draft.copy(fontScale = it) }
+                ValueSlider("カード角丸", "${draft.cardCornerDp.roundToInt()}dp", draft.cardCornerDp, 0f..40f, 39) { draft = draft.copy(cardCornerDp = it) }
+                ValueSlider("余白倍率", formatTwo(draft.spacingScale), draft.spacingScale, .80f..1.25f, 8) { draft = draft.copy(spacingScale = it) }
+                ValueSlider("カードの影", "${draft.cardElevationDp.roundToInt()}dp", draft.cardElevationDp, 0f..12f, 11) { draft = draft.copy(cardElevationDp = it) }
+            }
+            item { SectionTitle("動き") }
+            item {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    MotionStrength.values().forEach { value ->
+                        val label = when (value) { MotionStrength.NONE -> "なし"; MotionStrength.GENTLE -> "控えめ"; MotionStrength.STANDARD -> "標準"; MotionStrength.STRONG -> "強め" }
+                        if (draft.motionStrength == value) Button(onClick = { draft = draft.copy(motionStrength = value) }, Modifier.weight(1f)) { Text(label) }
+                        else OutlinedButton(onClick = { draft = draft.copy(motionStrength = value) }, Modifier.weight(1f)) { Text(label) }
+                    }
+                }
+                ValueSlider("時間倍率", formatTwo(draft.animationScale), draft.animationScale, 0f..2f, 19) { draft = draft.copy(animationScale = it) }
+                ValueSlider("カード追従量", formatTwo(draft.cardFollow), draft.cardFollow, .8f..1f, 9) { draft = draft.copy(cardFollow = it) }
+                ValueSlider("ガイド出現量", formatTwo(draft.guideReveal), draft.guideReveal, .5f..1f, 9) { draft = draft.copy(guideReveal = it) }
+            }
+            item {
+                SectionTitle("詳細JSON")
+                OutlinedButton(onClick = {
+                    showJson = !showJson
+                    if (showJson) jsonText = codec.encodeToString(draft)
+                }, Modifier.fillMaxWidth().height(48.dp)) { Text(if (showJson) "JSONを閉じる" else "JSONで全項目を編集") }
+                if (showJson) {
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(jsonText, { jsonText = it }, Modifier.fillMaxWidth(), minLines = 12, maxLines = 24, label = { Text("テーマJSON") })
+                    Button(onClick = {
+                        runCatching { codec.decodeFromString<ThemeDefinition>(jsonText) }.onSuccess { draft = it.copy(builtIn = false) }
+                    }, Modifier.fillMaxWidth().height(48.dp)) { Text("JSONをプレビューへ反映") }
+                }
+                Spacer(Modifier.height(80.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun LiveThemePreview(theme: ThemeDefinition, colors: ThemeColors) {
+    Column(
+        Modifier.fillMaxWidth().background(parseColor(colors.background), RoundedCornerShape(theme.largeCornerDp.dp)).padding(14.dp),
+    ) {
+        Text("ライブプレビュー", color = parseColor(colors.textSecondary), style = MaterialTheme.typography.caption)
+        Spacer(Modifier.height(8.dp))
+        Card(
+            Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(theme.cardCornerDp.dp),
+            elevation = theme.cardElevationDp.dp,
+            backgroundColor = parseColor(colors.surface),
+        ) {
+            Column(Modifier.padding(16.dp)) {
+                Text("見積書の金額を確認する", color = parseColor(colors.textPrimary), fontWeight = FontWeight(theme.headingWeight))
+                Text("今日 15:00 ・ 約10分", color = parseColor(colors.textSecondary))
+                Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Box(Modifier.weight(1f).background(parseColor(colors.defer), RoundedCornerShape(theme.smallCornerDp.dp)).padding(10.dp)) { Text("後で行う", color = Color.White, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) }
+                    Box(Modifier.weight(1f).background(parseColor(colors.success), RoundedCornerShape(theme.smallCornerDp.dp)).padding(10.dp)) { Text("完了", color = Color.White, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ColorField(label: String, value: String, onChange: (String) -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.width(40.dp).height(40.dp).background(parseColor(value), RoundedCornerShape(8.dp)).border(1.dp, MaterialTheme.colors.onBackground.copy(alpha = .25f), RoundedCornerShape(8.dp)))
+        Spacer(Modifier.width(10.dp))
+        OutlinedTextField(value, onChange, Modifier.weight(1f), label = { Text(label) }, singleLine = true)
+    }
+}
+
+@Composable
+fun DataToolsScreen(controller: AppController) {
+    var data by remember { mutableStateOf("") }
+    var mode by remember { mutableStateOf("export") }
+    OverlayScaffold("データ", controller::closeOverlay) { padding ->
+        LazyColumn(Modifier.fillMaxSize().padding(padding), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            item {
+                Text("バックアップ", style = MaterialTheme.typography.h6)
+                Text("アカウントや通信を使わず、項目・関係・テーマ・設定をJSONにまとめます。")
+            }
+            item {
+                Button(onClick = { controller.exportBackup { data = it; mode = "export" } }, Modifier.fillMaxWidth().height(52.dp)) { Text("バックアップを書き出す") }
+                OutlinedButton(onClick = { mode = "import"; data = "" }, Modifier.fillMaxWidth().height(48.dp)) { Text("バックアップを読み込む") }
+            }
+            item {
+                OutlinedTextField(
+                    data, { if (mode == "import") data = it }, Modifier.fillMaxWidth(),
+                    label = { Text(if (mode == "import") "バックアップJSONを貼り付け" else "作成したバックアップJSON") },
+                    readOnly = mode != "import", minLines = 12, maxLines = 26,
+                )
+                if (mode == "import") {
+                    Spacer(Modifier.height(10.dp))
+                    Button(onClick = { controller.importBackup(data) }, enabled = data.isNotBlank(), modifier = Modifier.fillMaxWidth().height(52.dp)) {
+                        Text("内容を確認して読み込む")
+                    }
+                }
+                Spacer(Modifier.height(80.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingSwitch(label: String, checked: Boolean, onChecked: (Boolean) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().height(56.dp).clickable { onChecked(!checked) },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, Modifier.weight(1f))
+        Switch(checked, onChecked)
+    }
+}
+
+@Composable
+private fun ValueSlider(label: String, valueLabel: String, value: Float, range: ClosedFloatingPointRange<Float>, steps: Int, onChange: (Float) -> Unit) {
+    Column(Modifier.fillMaxWidth()) {
+        Row { Text(label, Modifier.weight(1f)); Text(valueLabel, fontWeight = FontWeight.Bold) }
+        Slider(value = value.coerceIn(range.start, range.endInclusive), onValueChange = onChange, valueRange = range, steps = steps)
+    }
+}
+
+@Composable
+private fun SectionTitle(value: String) {
+    Text(value, style = MaterialTheme.typography.h6, modifier = Modifier.padding(top = 8.dp))
+}
+
+private fun formatRatio(value: Double): String = ((value * 10).roundToInt() / 10.0).toString()
+private fun formatTwo(value: Float): String = ((value * 100).roundToInt() / 100f).toString()

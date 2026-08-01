@@ -1,0 +1,9 @@
+<resources>
+    <string name="app_name">おぼえがき</string>
+    <string name="todos">やること</string>
+    <string name="memos">メモ</string>
+    <string name="all_items">すべて</string>
+    <string name="add">追加</string>
+    <string name="undo">元に戻す</string>
+</resources>
+
