@@ -70,6 +70,12 @@ fun SettingsScreen(settings: AppSettings, controller: AppController) {
                     draft = draft.copy(undoSeconds = it.roundToInt())
                 }
             }
+            item {
+                OutlinedButton(
+                    onClick = { controller.saveSettingsAndOpenOperationGuide(draft) },
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                ) { Text("${LocalAppTheme.current.icons.all} 操作ガイドを見る") }
+            }
             item { SectionTitle("後で行う") }
             item {
                 ValueSlider("何件後に再表示", "${draft.deferItems}件後", draft.deferItems.toFloat(), 1f..20f, 18) {
@@ -125,6 +131,94 @@ fun SettingsScreen(settings: AppSettings, controller: AppController) {
 }
 
 @Composable
+fun OperationGuideScreen(firstLaunch: Boolean, controller: AppController) {
+    val icons = LocalAppTheme.current.icons
+    OverlayScaffold(
+        title = if (firstLaunch) "はじめに" else "操作ガイド",
+        onClose = { controller.finishOperationGuide(firstLaunch) },
+        showHeaderClose = false,
+    ) { padding ->
+        Column(Modifier.fillMaxSize().padding(padding)) {
+            LazyColumn(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                item {
+                    Text(
+                        if (firstLaunch) "おぼえがきへようこそ" else "基本の操作",
+                        style = MaterialTheme.typography.h5,
+                    )
+                    Text(
+                        if (firstLaunch) "最初は空の状態です。思いついた内容を、やること・メモ・あとで分ける項目として追加できます。"
+                        else "スワイプとボタンの使い方をいつでも確認できます。",
+                        color = parseColor(LocalThemeColors.current.textSecondary),
+                    )
+                }
+                item {
+                    GuideStep(
+                        icon = icons.add,
+                        title = "まず追加する",
+                        body = "画面右下の追加ボタンを押します。ハンドルを上へ引くとやることの詳細が開き、下へ引くと閉じます。",
+                    )
+                }
+                item {
+                    GuideStep(
+                        icon = "${icons.previous} ${icons.next}",
+                        title = "カードを上下に動かす",
+                        body = "上へスワイプすると次へ、下へスワイプすると前へ移動します。前後のカードも指に合わせて動きます。",
+                    )
+                }
+                item {
+                    GuideStep(
+                        icon = "${icons.defer}  ${icons.complete}",
+                        title = "左右で整理する",
+                        body = "やることは左で後で行う、右で完了です。メモは左でしまう、右でやることにします。操作は元に戻せます。",
+                    )
+                }
+                item {
+                    GuideStep(
+                        icon = "${icons.todo}  ${icons.memo}  ${icons.all}",
+                        title = "画面を切り替える",
+                        body = "下の項目をタップするか、設定を有効にして空きスペースを左右へスワイプします。すべて画面から編集・並べ替え・復元ができます。",
+                    )
+                }
+                item {
+                    GuideStep(
+                        icon = "${icons.theme}  ${icons.settings}",
+                        title = "外観と操作を調整する",
+                        body = "すべて画面のテーマと設定から、色・フォント・アイコン・動き・触覚などを変更できます。このガイドも設定から見返せます。",
+                    )
+                    Spacer(Modifier.height(20.dp))
+                }
+            }
+            Button(
+                onClick = { controller.finishOperationGuide(firstLaunch) },
+                modifier = Modifier.fillMaxWidth().height(56.dp),
+            ) { Text(if (firstLaunch) "使い始める" else "設定へ戻る") }
+        }
+    }
+}
+
+@Composable
+private fun GuideStep(icon: String, title: String, body: String) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(LocalAppTheme.current.mediumCornerDp.dp),
+        elevation = 1.dp,
+        backgroundColor = parseColor(LocalThemeColors.current.surface),
+    ) {
+        Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(icon, style = MaterialTheme.typography.h5, modifier = Modifier.width(74.dp), textAlign = TextAlign.Center)
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.subtitle1, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(4.dp))
+                Text(body, style = MaterialTheme.typography.body2, color = parseColor(LocalThemeColors.current.textSecondary))
+            }
+        }
+    }
+}
+
+@Composable
 fun ThemeListScreen(themes: List<ThemeDefinition>, settings: AppSettings, controller: AppController) {
     OverlayScaffold("テーマ", controller::closeOverlay) { padding ->
         LazyColumn(
@@ -166,8 +260,18 @@ private fun ThemeListCard(theme: ThemeDefinition, selected: Boolean, controller:
                 }
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(theme.name, color = parseColor(colors.textPrimary), fontWeight = FontWeight.Bold)
-                    Text(if (theme.builtIn) "組み込み・複製して編集" else "カスタム", color = parseColor(colors.textSecondary), style = MaterialTheme.typography.caption)
+                    Text(
+                        "${theme.icons.todo} ${theme.icons.memo}  ${theme.name}",
+                        color = parseColor(colors.textPrimary),
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = themeFontFamily(theme.fontFamily),
+                    )
+                    Text(
+                        if (theme.builtIn) "組み込み・複製して編集" else "${theme.fontFamily}・カスタム",
+                        color = parseColor(colors.textSecondary),
+                        style = MaterialTheme.typography.caption,
+                        fontFamily = themeFontFamily(theme.fontFamily),
+                    )
                 }
                 Text(if (selected) "適用中 ✓" else "選ぶ", color = parseColor(colors.accent))
             }
@@ -231,7 +335,50 @@ fun ThemeEditorScreen(source: ThemeDefinition, controller: AppController) {
                 val primaryRatio = ThemePolicy.contrast(colors.textPrimary, colors.background)
                 Text("主な文字のコントラスト ${formatRatio(primaryRatio)} : 1（推奨 4.5 : 1）", color = if (primaryRatio < 4.5) parseColor(colors.warning) else parseColor(colors.success))
             }
-            item { SectionTitle("文字・形・余白・影") }
+            item { SectionTitle("フォント") }
+            item {
+                Text("アプリ全体で使用する文字の種類を選べます。", style = MaterialTheme.typography.body2)
+                Spacer(Modifier.height(8.dp))
+                val fontOptions = listOf(
+                    "System" to "端末標準",
+                    "Sans Serif" to "ゴシック",
+                    "Serif" to "明朝",
+                    "Monospace" to "等幅",
+                    "Cursive" to "手書き風",
+                )
+                fontOptions.chunked(2).forEach { row ->
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        row.forEach { (value, label) ->
+                            if (draft.fontFamily == value) {
+                                Button(
+                                    onClick = { draft = draft.copy(fontFamily = value) },
+                                    modifier = Modifier.weight(1f).height(48.dp),
+                                ) { Text(label, fontFamily = themeFontFamily(value)) }
+                            } else {
+                                OutlinedButton(
+                                    onClick = { draft = draft.copy(fontFamily = value) },
+                                    modifier = Modifier.weight(1f).height(48.dp),
+                                ) { Text(label, fontFamily = themeFontFamily(value)) }
+                            }
+                        }
+                        if (row.size == 1) Spacer(Modifier.weight(1f))
+                    }
+                    Spacer(Modifier.height(8.dp))
+                }
+            }
+            item { SectionTitle("アイコン") }
+            item {
+                Text("絵文字や記号を入力して、テーマごとに自由に変更できます。", style = MaterialTheme.typography.body2)
+                Spacer(Modifier.height(8.dp))
+                IconFieldRow("やること", draft.icons.todo, { draft = draft.copy(icons = draft.icons.copy(todo = it)) }, "メモ", draft.icons.memo, { draft = draft.copy(icons = draft.icons.copy(memo = it)) })
+                IconFieldRow("すべて", draft.icons.all, { draft = draft.copy(icons = draft.icons.copy(all = it)) }, "追加", draft.icons.add, { draft = draft.copy(icons = draft.icons.copy(add = it)) })
+                IconFieldRow("編集", draft.icons.edit, { draft = draft.copy(icons = draft.icons.copy(edit = it)) }, "完了", draft.icons.complete, { draft = draft.copy(icons = draft.icons.copy(complete = it)) })
+                IconFieldRow("後で行う", draft.icons.defer, { draft = draft.copy(icons = draft.icons.copy(defer = it)) }, "やること化", draft.icons.convert, { draft = draft.copy(icons = draft.icons.copy(convert = it)) })
+                IconFieldRow("しまう", draft.icons.archive, { draft = draft.copy(icons = draft.icons.copy(archive = it)) }, "次へ", draft.icons.next, { draft = draft.copy(icons = draft.icons.copy(next = it)) })
+                IconFieldRow("前へ", draft.icons.previous, { draft = draft.copy(icons = draft.icons.copy(previous = it)) }, "操作不可", draft.icons.unavailable, { draft = draft.copy(icons = draft.icons.copy(unavailable = it)) })
+                IconFieldRow("テーマ", draft.icons.theme, { draft = draft.copy(icons = draft.icons.copy(theme = it)) }, "設定", draft.icons.settings, { draft = draft.copy(icons = draft.icons.copy(settings = it)) })
+            }
+            item { SectionTitle("文字サイズ・形・余白・影") }
             item {
                 ValueSlider("文字倍率", formatTwo(draft.fontScale), draft.fontScale, .85f..1.30f, 8) { draft = draft.copy(fontScale = it) }
                 ValueSlider("カード角丸", "${draft.cardCornerDp.roundToInt()}dp", draft.cardCornerDp, 0f..40f, 39) { draft = draft.copy(cardCornerDp = it) }
@@ -272,10 +419,11 @@ fun ThemeEditorScreen(source: ThemeDefinition, controller: AppController) {
 
 @Composable
 private fun LiveThemePreview(theme: ThemeDefinition, colors: ThemeColors) {
+    val fontFamily = themeFontFamily(theme.fontFamily)
     Column(
         Modifier.fillMaxWidth().background(parseColor(colors.background), RoundedCornerShape(theme.largeCornerDp.dp)).padding(14.dp),
     ) {
-        Text("ライブプレビュー", color = parseColor(colors.textSecondary), style = MaterialTheme.typography.caption)
+        Text("ライブプレビュー", color = parseColor(colors.textSecondary), style = MaterialTheme.typography.caption, fontFamily = fontFamily)
         Spacer(Modifier.height(8.dp))
         Card(
             Modifier.fillMaxWidth(),
@@ -284,15 +432,41 @@ private fun LiveThemePreview(theme: ThemeDefinition, colors: ThemeColors) {
             backgroundColor = parseColor(colors.surface),
         ) {
             Column(Modifier.padding(16.dp)) {
-                Text("見積書の金額を確認する", color = parseColor(colors.textPrimary), fontWeight = FontWeight(theme.headingWeight))
-                Text("今日 15:00 ・ 約10分", color = parseColor(colors.textSecondary))
+                Text("${theme.icons.todo} 見積書の金額を確認する", color = parseColor(colors.textPrimary), fontWeight = FontWeight(theme.headingWeight), fontFamily = fontFamily)
+                Text("今日 15:00 ・ 約10分", color = parseColor(colors.textSecondary), fontFamily = fontFamily)
                 Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Box(Modifier.weight(1f).background(parseColor(colors.defer), RoundedCornerShape(theme.smallCornerDp.dp)).padding(10.dp)) { Text("後で行う", color = Color.White, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) }
-                    Box(Modifier.weight(1f).background(parseColor(colors.success), RoundedCornerShape(theme.smallCornerDp.dp)).padding(10.dp)) { Text("完了", color = Color.White, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) }
+                    Box(Modifier.weight(1f).background(parseColor(colors.defer), RoundedCornerShape(theme.smallCornerDp.dp)).padding(10.dp)) { Text("${theme.icons.defer} 後で行う", color = Color.White, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(), fontFamily = fontFamily) }
+                    Box(Modifier.weight(1f).background(parseColor(colors.success), RoundedCornerShape(theme.smallCornerDp.dp)).padding(10.dp)) { Text("${theme.icons.complete} 完了", color = Color.White, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(), fontFamily = fontFamily) }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun IconFieldRow(
+    leftLabel: String,
+    leftValue: String,
+    onLeftChange: (String) -> Unit,
+    rightLabel: String,
+    rightValue: String,
+    onRightChange: (String) -> Unit,
+) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        IconField(leftLabel, leftValue, onLeftChange, Modifier.weight(1f))
+        IconField(rightLabel, rightValue, onRightChange, Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun IconField(label: String, value: String, onChange: (String) -> Unit, modifier: Modifier = Modifier) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = { onChange(it.take(8)) },
+        modifier = modifier,
+        label = { Text(label) },
+        singleLine = true,
+    )
 }
 
 @Composable

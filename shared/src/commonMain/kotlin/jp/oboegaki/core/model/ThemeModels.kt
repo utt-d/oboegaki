@@ -32,6 +32,24 @@ data class ThemeColors(
 )
 
 @Serializable
+data class ThemeIcons(
+    val todo: String = "✓",
+    val memo: String = "✎",
+    val all: String = "☰",
+    val add: String = "＋",
+    val edit: String = "✎",
+    val complete: String = "✓",
+    val defer: String = "↶",
+    val convert: String = "→",
+    val archive: String = "□",
+    val next: String = "↑",
+    val previous: String = "↓",
+    val unavailable: String = "⊘",
+    val theme: String = "◉",
+    val settings: String = "⚙",
+)
+
+@Serializable
 data class ThemeDefinition(
     val schemaVersion: Int = 1,
     val id: String,
@@ -40,6 +58,7 @@ data class ThemeDefinition(
     val light: ThemeColors,
     val dark: ThemeColors,
     val fontFamily: String = "System",
+    val icons: ThemeIcons = ThemeIcons(),
     val fontScale: Float = 1f,
     val headingWeight: Int = 600,
     val bodyWeight: Int = 400,
@@ -71,4 +90,5 @@ data class AppSettings(
     val reducedMotion: Boolean = false,
     val appearanceMode: AppearanceMode = AppearanceMode.SYSTEM,
     val selectedThemeId: String = "standard",
+    val operationGuideSeen: Boolean = false,
 )

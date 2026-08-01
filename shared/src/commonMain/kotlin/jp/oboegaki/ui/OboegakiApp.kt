@@ -55,6 +55,7 @@ fun OboegakiApp(
     val undo by controller.undo.collectAsState()
     val message by controller.message.collectAsState()
     val theme = themes.firstOrNull { it.id == settings.selectedThemeId } ?: BuiltInThemes.standard
+    val icons = theme.icons
     val tabSwipeThreshold = with(LocalDensity.current) { 56.dp.toPx() }
     val hapticFeedback = LocalHapticFeedback.current
 
@@ -88,22 +89,22 @@ fun OboegakiApp(
                         elevation = 0.dp,
                         actions = {
                             if (tab == MainTab.ALL) {
-                                TextButton(onClick = controller::openThemes) { Text("テーマ") }
-                                TextButton(onClick = controller::openSettings) { Text("設定") }
+                                TextButton(onClick = controller::openThemes) { Text("${icons.theme} テーマ") }
+                                TextButton(onClick = controller::openSettings) { Text("${icons.settings} 設定") }
                             }
                         },
                     )
                 },
                 bottomBar = {
                     BottomAppBar(backgroundColor = MaterialTheme.colors.surface) {
-                        BottomNavItem("やること", tab == MainTab.TODOS) { controller.selectTab(MainTab.TODOS) }
-                        BottomNavItem("メモ", tab == MainTab.MEMOS) { controller.selectTab(MainTab.MEMOS) }
-                        BottomNavItem("すべて", tab == MainTab.ALL) { controller.selectTab(MainTab.ALL) }
+                        BottomNavItem("やること", icons.todo, tab == MainTab.TODOS) { controller.selectTab(MainTab.TODOS) }
+                        BottomNavItem("メモ", icons.memo, tab == MainTab.MEMOS) { controller.selectTab(MainTab.MEMOS) }
+                        BottomNavItem("すべて", icons.all, tab == MainTab.ALL) { controller.selectTab(MainTab.ALL) }
                     }
                 },
                 floatingActionButton = {
                     FloatingActionButton(onClick = controller::openAdd, shape = CircleShape) {
-                        Text("＋", style = MaterialTheme.typography.h5)
+                        Text(icons.add, style = MaterialTheme.typography.h5)
                     }
                 },
                 isFloatingActionButtonDocked = false,
@@ -201,13 +202,14 @@ private fun Modifier.detectUnconsumedHorizontalSwipe(
 @Composable
 private fun androidx.compose.foundation.layout.RowScope.BottomNavItem(
     label: String,
+    icon: String,
     selected: Boolean,
     onClick: () -> Unit,
 ) {
     BottomNavigationItem(
         selected = selected,
         onClick = onClick,
-        icon = { Text(if (selected) "●" else "○") },
+        icon = { Text(icon, color = if (selected) MaterialTheme.colors.primary else MaterialTheme.colors.onSurface.copy(alpha = .62f)) },
         label = { Text(label) },
         alwaysShowLabel = true,
     )

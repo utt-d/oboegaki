@@ -71,12 +71,15 @@ fun TodoScreen(
     hapticsEnabled: Boolean,
     controller: AppController,
 ) {
+    val icons = LocalAppTheme.current.icons
     SwipeDeck(
         items = items,
         focusedIndex = focusedIndex,
         kind = ItemKind.TODO,
         rightLabel = "完了",
         leftLabel = "後で行う",
+        rightIcon = icons.complete,
+        leftIcon = icons.defer,
         onRight = controller::completeCurrent,
         onLeft = controller::deferCurrent,
         onUp = controller::nextTodo,
@@ -93,12 +96,15 @@ fun MemoScreen(
     hapticsEnabled: Boolean,
     controller: AppController,
 ) {
+    val icons = LocalAppTheme.current.icons
     SwipeDeck(
         items = items,
         focusedIndex = focusedIndex,
         kind = ItemKind.MEMO,
         rightLabel = "やることにする",
         leftLabel = "しまう",
+        rightIcon = icons.convert,
+        leftIcon = icons.archive,
         onRight = controller::convertCurrentMemo,
         onLeft = controller::archiveCurrentMemo,
         onUp = controller::nextMemo,
@@ -115,6 +121,8 @@ private fun SwipeDeck(
     kind: ItemKind,
     rightLabel: String,
     leftLabel: String,
+    rightIcon: String,
+    leftIcon: String,
     onRight: () -> Unit,
     onLeft: () -> Unit,
     onUp: () -> Unit,
@@ -209,7 +217,7 @@ private fun SwipeDeck(
         Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
             Text("${safeIndex + 1} / ${items.size}", style = MaterialTheme.typography.caption, color = parseColor(tokens.textSecondary))
             Spacer(Modifier.height(10.dp))
-            SwipeOperationGuide(leftLabel, rightLabel)
+            SwipeOperationGuide(leftLabel, rightLabel, leftIcon, rightIcon)
             Spacer(Modifier.height(8.dp))
             val verticalOffset = if (axis == DragAxis.VERTICAL) {
                 dragY.coerceIn(-verticalTransitionPx, verticalTransitionPx)
@@ -229,13 +237,13 @@ private fun SwipeDeck(
             val bottomWidth = if (movingUp) lerpFloat(previewWidth, 1f, verticalProgress) else previewWidth
 
             Box(Modifier.fillMaxWidth().weight(1f).clipToBounds(), contentAlignment = Alignment.Center) {
-                HorizontalGuide(rightLabel, leftLabel, dragX, axis)
+                HorizontalGuide(rightLabel, leftLabel, rightIcon, leftIcon, dragX, axis)
 
                 MorphingDeckCard(
                     item = items.getOrNull(safeIndex - 2),
                     positionLabel = "前のカード",
                     edgeText = "ここが最初です",
-                    directionMark = "↓",
+                    directionMark = theme.icons.previous,
                     height = previewHeight,
                     widthFraction = previewWidth,
                     offsetX = 0f,
@@ -251,7 +259,7 @@ private fun SwipeDeck(
                     item = items.getOrNull(safeIndex + 2),
                     positionLabel = "次のカード",
                     edgeText = "ここが最後です",
-                    directionMark = "↑",
+                    directionMark = theme.icons.next,
                     height = previewHeight,
                     widthFraction = previewWidth,
                     offsetX = 0f,
@@ -267,7 +275,7 @@ private fun SwipeDeck(
                     item = items.getOrNull(safeIndex - 1),
                     positionLabel = "前のカード",
                     edgeText = "ここが最初です",
-                    directionMark = "↓",
+                    directionMark = theme.icons.previous,
                     height = topHeight,
                     widthFraction = topWidth,
                     offsetX = 0f,
@@ -283,7 +291,7 @@ private fun SwipeDeck(
                     item = items.getOrNull(safeIndex + 1),
                     positionLabel = "次のカード",
                     edgeText = "ここが最後です",
-                    directionMark = "↑",
+                    directionMark = theme.icons.next,
                     height = bottomHeight,
                     widthFraction = bottomWidth,
                     offsetX = 0f,
@@ -299,7 +307,7 @@ private fun SwipeDeck(
                     item = item,
                     positionLabel = if (movingDown) "次のカード" else "前のカード",
                     edgeText = "",
-                    directionMark = if (movingDown) "↑" else "↓",
+                    directionMark = if (movingDown) theme.icons.next else theme.icons.previous,
                     height = currentHeight,
                     widthFraction = currentWidth,
                     offsetX = dragX,
@@ -386,7 +394,7 @@ private fun SwipeDeck(
             OutlinedButton(
                 onClick = { onEdit(item) },
                 modifier = Modifier.fillMaxWidth().padding(end = 88.dp).height(48.dp),
-            ) { Text("編集") }
+            ) { Text("${theme.icons.edit} 編集") }
         }
     }
 }
@@ -395,6 +403,8 @@ private fun SwipeDeck(
 private fun HorizontalGuide(
     rightLabel: String,
     leftLabel: String,
+    rightIcon: String,
+    leftIcon: String,
     dragX: Float,
     axis: DragAxis?,
 ) {
@@ -413,7 +423,7 @@ private fun HorizontalGuide(
         contentAlignment = if (revealRight) Alignment.CenterStart else Alignment.CenterEnd,
     ) {
         Text(
-            if (revealRight) "✓  $rightLabel" else "$leftLabel  ↶",
+            if (revealRight) "$rightIcon  $rightLabel" else "$leftLabel  $leftIcon",
             Modifier.padding(20.dp),
             color = Color.White,
             fontWeight = FontWeight.Bold,
@@ -444,7 +454,7 @@ private fun ItemCardContent(item: AppItem) {
                 item.todo?.dueAtEpochMillis?.let { Text("期限  ${formatDateTime(it)}", color = parseColor(tokens.warning)) }
                 item.todo?.estimatedMinutes?.let { Text("約${it}分") }
                 val deferred = item.todo?.deferCount ?: 0
-                if (deferred > 0) Text("↶ ${deferred}回 後で行う", color = parseColor(tokens.defer))
+                if (deferred > 0) Text("${LocalAppTheme.current.icons.defer} ${deferred}回 後で行う", color = parseColor(tokens.defer))
             }
         }
     }
@@ -533,7 +543,7 @@ private fun PreviewCardContent(
                 maxLines = 1,
             )
         }
-        Text(if (item == null) "⊘" else directionMark, color = borderColor)
+        Text(if (item == null) LocalAppTheme.current.icons.unavailable else directionMark, color = borderColor)
     }
 }
 
@@ -551,7 +561,7 @@ private fun lerpDp(start: Dp, end: Dp, progress: Float): Dp =
     lerpFloat(start.value, end.value, progress).dp
 
 @Composable
-private fun SwipeOperationGuide(leftLabel: String, rightLabel: String) {
+private fun SwipeOperationGuide(leftLabel: String, rightLabel: String, leftIcon: String, rightIcon: String) {
     val tokens = LocalThemeColors.current
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -568,9 +578,9 @@ private fun SwipeOperationGuide(leftLabel: String, rightLabel: String) {
                 color = parseColor(tokens.textSecondary),
             )
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("← $leftLabel", Modifier.weight(1f), style = MaterialTheme.typography.caption)
-                Text("↑ 次へ ・ 前へ ↓", Modifier.weight(1f), textAlign = TextAlign.Center, style = MaterialTheme.typography.caption)
-                Text("$rightLabel →", Modifier.weight(1f), textAlign = TextAlign.End, style = MaterialTheme.typography.caption)
+                Text("$leftIcon $leftLabel", Modifier.weight(1f), style = MaterialTheme.typography.caption)
+                Text("${LocalAppTheme.current.icons.next} 次へ ・ 前へ ${LocalAppTheme.current.icons.previous}", Modifier.weight(1f), textAlign = TextAlign.Center, style = MaterialTheme.typography.caption)
+                Text("$rightLabel $rightIcon", Modifier.weight(1f), textAlign = TextAlign.End, style = MaterialTheme.typography.caption)
             }
         }
     }
@@ -586,7 +596,7 @@ private fun EmptyDeck(kind: ItemKind) {
     ) {
         Text("ここにはまだ${label}がありません", style = MaterialTheme.typography.h6, textAlign = TextAlign.Center)
         Spacer(Modifier.height(8.dp))
-        Text("＋ から追加できます", color = parseColor(LocalThemeColors.current.textSecondary))
+        Text("${LocalAppTheme.current.icons.add} から追加できます", color = parseColor(LocalThemeColors.current.textSecondary))
     }
 }
 

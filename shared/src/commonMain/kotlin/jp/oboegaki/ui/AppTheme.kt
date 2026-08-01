@@ -10,6 +10,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import jp.oboegaki.core.data.BuiltInThemes
@@ -59,19 +60,29 @@ fun OboegakiTheme(
         onError = parseColor(tokens.surface),
     )
     val scale = theme.fontScale
+    val fontFamily = themeFontFamily(theme.fontFamily)
     val typography = Typography(
-        h4 = TextStyle(fontSize = 28.sp * scale, fontWeight = FontWeight(theme.headingWeight)),
-        h5 = TextStyle(fontSize = 23.sp * scale, fontWeight = FontWeight(theme.headingWeight)),
-        h6 = TextStyle(fontSize = 19.sp * scale, fontWeight = FontWeight(theme.headingWeight)),
-        subtitle1 = TextStyle(fontSize = 16.sp * scale, fontWeight = FontWeight.Medium),
-        body1 = TextStyle(fontSize = 16.sp * scale, fontWeight = FontWeight(theme.bodyWeight)),
-        body2 = TextStyle(fontSize = 14.sp * scale, fontWeight = FontWeight(theme.bodyWeight)),
-        button = TextStyle(fontSize = 14.sp * scale, fontWeight = FontWeight.SemiBold),
-        caption = TextStyle(fontSize = 12.sp * scale, fontWeight = FontWeight.Normal),
+        defaultFontFamily = fontFamily,
+        h4 = TextStyle(fontSize = 28.sp * scale, fontWeight = FontWeight(theme.headingWeight), fontFamily = fontFamily),
+        h5 = TextStyle(fontSize = 23.sp * scale, fontWeight = FontWeight(theme.headingWeight), fontFamily = fontFamily),
+        h6 = TextStyle(fontSize = 19.sp * scale, fontWeight = FontWeight(theme.headingWeight), fontFamily = fontFamily),
+        subtitle1 = TextStyle(fontSize = 16.sp * scale, fontWeight = FontWeight.Medium, fontFamily = fontFamily),
+        body1 = TextStyle(fontSize = 16.sp * scale, fontWeight = FontWeight(theme.bodyWeight), fontFamily = fontFamily),
+        body2 = TextStyle(fontSize = 14.sp * scale, fontWeight = FontWeight(theme.bodyWeight), fontFamily = fontFamily),
+        button = TextStyle(fontSize = 14.sp * scale, fontWeight = FontWeight.SemiBold, fontFamily = fontFamily),
+        caption = TextStyle(fontSize = 12.sp * scale, fontWeight = FontWeight.Normal, fontFamily = fontFamily),
     )
     CompositionLocalProvider(LocalAppTheme provides theme, LocalThemeColors provides tokens) {
         MaterialTheme(colors = colors, typography = typography, content = content)
     }
+}
+
+fun themeFontFamily(value: String): FontFamily = when (value) {
+    "Sans Serif", "Noto Sans JP" -> FontFamily.SansSerif
+    "Serif", "Noto Serif JP" -> FontFamily.Serif
+    "Monospace" -> FontFamily.Monospace
+    "Cursive" -> FontFamily.Cursive
+    else -> FontFamily.Default
 }
 
 fun parseColor(value: String): Color {

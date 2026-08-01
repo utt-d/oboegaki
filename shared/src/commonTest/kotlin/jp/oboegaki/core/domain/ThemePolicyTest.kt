@@ -1,6 +1,7 @@
 package jp.oboegaki.core.domain
 
 import jp.oboegaki.core.data.BuiltInThemes
+import jp.oboegaki.core.model.ThemeIcons
 import kotlin.test.Test
 import kotlin.test.assertIs
 
@@ -18,5 +19,16 @@ class ThemePolicyTest {
         )
         assertIs<ThemeValidation.Invalid>(ThemePolicy.validate(broken))
     }
-}
 
+    @Test
+    fun editableFontAndIconsAreValidated() {
+        val customized = BuiltInThemes.standard.copy(
+            id = "customized",
+            fontFamily = "Monospace",
+            icons = ThemeIcons(todo = "◆", memo = "◇", add = "✚"),
+        )
+        assertIs<ThemeValidation.Valid>(ThemePolicy.validate(customized))
+        assertIs<ThemeValidation.Invalid>(ThemePolicy.validate(customized.copy(fontFamily = "Unknown Font")))
+        assertIs<ThemeValidation.Invalid>(ThemePolicy.validate(customized.copy(icons = customized.icons.copy(add = ""))))
+    }
+}

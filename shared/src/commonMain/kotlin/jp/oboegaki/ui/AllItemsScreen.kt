@@ -149,7 +149,7 @@ private fun AllItemRow(
                             }
                         },
                         contentAlignment = Alignment.Center,
-                    ) { Text("≡", style = MaterialTheme.typography.h6, color = itemKindColor(item)) }
+                    ) { Text(LocalAppTheme.current.icons.all, style = MaterialTheme.typography.h6, color = itemKindColor(item)) }
                 } else {
                     Box(Modifier.size(12.dp).background(itemKindColor(item), shape = androidx.compose.foundation.shape.CircleShape))
                     Spacer(Modifier.width(12.dp))
@@ -158,7 +158,7 @@ private fun AllItemRow(
                     Text(item.title, maxLines = 2, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium)
                     Text(itemSubtitle(item), style = MaterialTheme.typography.caption, color = parseColor(tokens.textSecondary))
                 }
-                TextButton(onClick = { controller.openEdit(item.id) }, modifier = Modifier.height(48.dp)) { Text("編集") }
+                TextButton(onClick = { controller.openEdit(item.id) }, modifier = Modifier.height(48.dp)) { Text("${theme.icons.edit} 編集") }
             }
             restoreLabel?.let {
                 OutlinedButton(onClick = { controller.restore(item.id) }, Modifier.fillMaxWidth().height(48.dp)) { Text(it) }

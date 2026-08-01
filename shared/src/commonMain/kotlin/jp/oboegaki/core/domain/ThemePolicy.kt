@@ -2,6 +2,7 @@ package jp.oboegaki.core.domain
 
 import jp.oboegaki.core.model.ThemeColors
 import jp.oboegaki.core.model.ThemeDefinition
+import jp.oboegaki.core.model.ThemeIcons
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
@@ -19,6 +20,12 @@ object ThemePolicy {
     fun validate(theme: ThemeDefinition): ThemeValidation {
         if (theme.schemaVersion != 1) return ThemeValidation.Invalid("未対応のテーマ形式です")
         if (theme.name.trim().isEmpty()) return ThemeValidation.Invalid("テーマ名を入力してください")
+        if (theme.fontFamily !in supportedFontFamilies) {
+            return ThemeValidation.Invalid("対応していないフォントです")
+        }
+        if (allIcons(theme.icons).any { it.isBlank() || it.length > 8 }) {
+            return ThemeValidation.Invalid("アイコンは1〜4文字程度で入力してください")
+        }
         if (theme.fontScale !in .85f..1.30f || theme.spacingScale !in .80f..1.25f) {
             return ThemeValidation.Invalid("文字または余白の値が許可範囲外です")
         }
@@ -59,6 +66,17 @@ object ThemePolicy {
         c.danger, c.warning, c.disabled, c.unavailableGuide, c.focusRing,
     )
 
+    private fun allIcons(icons: ThemeIcons) = listOf(
+        icons.todo, icons.memo, icons.all, icons.add, icons.edit, icons.complete, icons.defer,
+        icons.convert, icons.archive, icons.next, icons.previous, icons.unavailable,
+        icons.theme, icons.settings,
+    )
+
+    val supportedFontFamilies = listOf(
+        "System", "Sans Serif", "Serif", "Monospace", "Cursive",
+        "Noto Sans JP", "Noto Serif JP",
+    )
+
     private fun alpha(value: String): Int = if (value.length == 9) value.substring(1, 3).toInt(16) else 255
 
     private fun luminance(value: String): Double {
@@ -70,4 +88,3 @@ object ThemePolicy {
         return .2126 * channel(0) + .7152 * channel(2) + .0722 * channel(4)
     }
 }
-

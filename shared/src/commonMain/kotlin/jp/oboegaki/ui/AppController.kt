@@ -32,6 +32,7 @@ sealed interface AppOverlay {
     data object Themes : AppOverlay
     data class ThemeEditor(val theme: ThemeDefinition) : AppOverlay
     data object DataTools : AppOverlay
+    data class OperationGuide(val firstLaunch: Boolean) : AppOverlay
 }
 
 data class UndoNotice(val message: String)
@@ -63,9 +64,9 @@ class AppController(
     val message: StateFlow<String?> = _message
     private var undoJob: Job? = null
     private var messageJob: Job? = null
+    private var initialGuideResolved = false
 
     init {
-        scope.launch { repository.seedIfEmpty() }
         scope.launch {
             repository.observeAllSections().collect { value ->
                 _sections.value = value
@@ -73,7 +74,17 @@ class AppController(
                 _memoIndex.value = _memoIndex.value.coerceIn(0, (value.memos.lastIndex).coerceAtLeast(0))
             }
         }
-        scope.launch { repository.observeSettings().collect { _settings.value = it } }
+        scope.launch {
+            repository.observeSettings().collect { value ->
+                _settings.value = value
+                if (!initialGuideResolved) {
+                    initialGuideResolved = true
+                    if (!value.operationGuideSeen && _overlay.value == null) {
+                        _overlay.value = AppOverlay.OperationGuide(firstLaunch = true)
+                    }
+                }
+            }
+        }
         scope.launch { repository.observeThemes().collect { _themes.value = it } }
         scope.launch { repository.observeRelations().collect { _relations.value = it } }
     }
@@ -99,6 +110,17 @@ class AppController(
     fun openThemes() { _overlay.value = AppOverlay.Themes }
     fun openThemeEditor(theme: ThemeDefinition) { _overlay.value = AppOverlay.ThemeEditor(theme) }
     fun openDataTools() { _overlay.value = AppOverlay.DataTools }
+    fun openOperationGuide() { _overlay.value = AppOverlay.OperationGuide(firstLaunch = false) }
+    fun saveSettingsAndOpenOperationGuide(value: AppSettings) = scope.launch {
+        repository.saveSettings(value)
+        _overlay.value = AppOverlay.OperationGuide(firstLaunch = false)
+    }
+    fun finishOperationGuide(firstLaunch: Boolean) = scope.launch {
+        if (!_settings.value.operationGuideSeen) {
+            repository.saveSettings(_settings.value.copy(operationGuideSeen = true))
+        }
+        _overlay.value = if (firstLaunch) null else AppOverlay.Settings
+    }
     fun closeOverlay() { _overlay.value = null }
 
     fun quickAdd(kind: ItemKind, text: String, onAdded: (AppItem) -> Unit = {}) = scope.launch {

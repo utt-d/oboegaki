@@ -16,7 +16,6 @@ import jp.oboegaki.core.model.AppSettings
 import jp.oboegaki.core.model.ItemKind
 import jp.oboegaki.core.model.ItemLifecycle
 import jp.oboegaki.core.model.ItemRelation
-import jp.oboegaki.core.model.Priority
 import jp.oboegaki.core.model.ThemeDefinition
 import jp.oboegaki.core.model.TodoDetail
 import jp.oboegaki.platform.NoOpReminderScheduler
@@ -56,7 +55,6 @@ interface ItemRepository {
     suspend fun saveSettings(settings: AppSettings)
     suspend fun saveTheme(theme: ThemeDefinition): ThemeValidation
     suspend fun deleteTheme(id: String)
-    suspend fun seedIfEmpty()
     suspend fun exportBackupJson(): String
     suspend fun importBackupJson(value: String): BackupImportResult
 }
@@ -372,19 +370,6 @@ class RoomItemRepository(
 
     override suspend fun deleteTheme(id: String) = dao.deleteCustomTheme(id)
 
-    override suspend fun seedIfEmpty() {
-        if (dao.getItems().isNotEmpty()) return
-        val time = now()
-        val samples = listOf(
-            sampleTodo("見積書の金額を確認する", time, 1_000, Priority.HIGH, 10),
-            sampleTodo("メールに返信する", time, 2_000, Priority.NORMAL, 10),
-            sampleTodo("机の上を5分だけ片付ける", time, 3_000, Priority.NORMAL, 5),
-            AppItem(newId(), ItemKind.MEMO, title = "読みたい本を調べる", body = "気になった題名やURLをここへ", manualRank = 1_000, createdAtEpochMillis = time, updatedAtEpochMillis = time),
-            AppItem(newId(), ItemKind.UNSORTED, title = "週末の予定を考える", manualRank = 1_000, createdAtEpochMillis = time, updatedAtEpochMillis = time),
-        )
-        database.inTransaction { samples.forEach { upsert(it) } }
-    }
-
     override suspend fun exportBackupJson(): String {
         val state = currentState()
         val themes = dao.getThemes().mapNotNull { runCatching { json.decodeFromString<ThemeDefinition>(it.json) }.getOrNull() }
@@ -453,13 +438,6 @@ class RoomItemRepository(
         item.todo?.let { dao.upsertTodoDetail(it.toEntity(item.id)) }
         if (item.todo == null) dao.getTodoDetail(item.id)?.let { dao.deleteTodoDetail(it) }
     }
-
-    private fun sampleTodo(title: String, time: Long, rank: Long, priority: Priority, minutes: Int) =
-        AppItem(
-            id = newId(), kind = ItemKind.TODO, title = title, manualRank = rank,
-            createdAtEpochMillis = time, updatedAtEpochMillis = time,
-            todo = TodoDetail(priority = priority, estimatedMinutes = minutes),
-        )
 
     private fun newId(): String = buildString {
         append(now().toString(16))

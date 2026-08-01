@@ -104,6 +104,7 @@ fun OverlayHost(
             AppOverlay.Themes -> ThemeListScreen(themes, settings, controller)
             is AppOverlay.ThemeEditor -> ThemeEditorScreen(overlay.theme, controller)
             AppOverlay.DataTools -> DataToolsScreen(controller)
+            is AppOverlay.OperationGuide -> OperationGuideScreen(overlay.firstLaunch, controller)
         }
     }
 }

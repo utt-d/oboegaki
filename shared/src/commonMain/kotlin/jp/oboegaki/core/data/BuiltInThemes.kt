@@ -25,7 +25,7 @@ object BuiltInThemes {
         id = "paper", name = "紙", builtIn = true,
         light = standardLight.copy(background = "#F2E9D8", surface = "#FFFDF6", surfaceAlt = "#E8D9BF", accent = "#7A5138"),
         dark = standardDark.copy(background = "#201B17", surface = "#2C251F", accent = "#D9B38C"),
-        fontFamily = "Noto Serif JP", cardCornerDp = 10f, cardElevationDp = 1f,
+        fontFamily = "Serif", cardCornerDp = 10f, cardElevationDp = 1f,
     )
     val highContrast = standard.copy(
         id = "high-contrast", name = "高コントラスト", builtIn = true,
@@ -50,4 +50,3 @@ object BuiltInThemes {
         success, defer, archive, convert, danger, warning, disabled, guide, focus,
     )
 }
-
