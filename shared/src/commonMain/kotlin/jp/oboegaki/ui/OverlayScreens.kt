@@ -5,8 +5,10 @@ import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,6 +27,7 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.Button
@@ -37,13 +40,16 @@ import androidx.compose.material.Surface
 import androidx.compose.material.Text
 import androidx.compose.material.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -66,6 +72,7 @@ import jp.oboegaki.core.model.Priority
 import jp.oboegaki.core.model.RelationType
 import jp.oboegaki.core.model.ThemeDefinition
 import jp.oboegaki.core.model.TodoDetail
+import kotlinx.coroutines.launch
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.LocalDateTime
@@ -707,29 +714,35 @@ private fun ClockTimePickerDialog(
         ) {
             Column(Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("${label}の時刻", style = MaterialTheme.typography.h6, modifier = Modifier.fillMaxWidth())
-                Spacer(Modifier.height(20.dp))
+                Text(
+                    "時間と分を上下に動かして選びます",
+                    style = MaterialTheme.typography.caption,
+                    color = parseColor(LocalThemeColors.current.textSecondary),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(12.dp))
                 Text(
                     "${hour.twoDigits()}:${minute.twoDigits()}",
                     style = MaterialTheme.typography.h4,
                 )
-                Spacer(Modifier.height(18.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    TimeStepper(
+                Spacer(Modifier.height(8.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    TimeWheel(
                         label = "時",
-                        value = hour.twoDigits(),
-                        onDecrease = { hour = (hour + 23) % 24 },
-                        onIncrease = { hour = (hour + 1) % 24 },
+                        values = 0..23,
+                        selected = hour,
+                        onSelected = { hour = it },
                         modifier = Modifier.weight(1f),
                     )
-                    TimeStepper(
+                    TimeWheel(
                         label = "分",
-                        value = minute.twoDigits(),
-                        onDecrease = { minute = (minute + 55) % 60 },
-                        onIncrease = { minute = (minute + 5) % 60 },
+                        values = 0..59,
+                        selected = minute,
+                        onSelected = { minute = it },
                         modifier = Modifier.weight(1f),
                     )
                 }
-                Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.height(10.dp))
                 Text("よく使う時刻", style = MaterialTheme.typography.subtitle2, modifier = Modifier.fillMaxWidth())
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     listOf(9 to 0, 12 to 0, 18 to 0).forEach { (quickHour, quickMinute) ->
@@ -756,23 +769,85 @@ private fun ClockTimePickerDialog(
 }
 
 @Composable
-private fun TimeStepper(
+private fun TimeWheel(
     label: String,
-    value: String,
-    onDecrease: () -> Unit,
-    onIncrease: () -> Unit,
+    values: IntRange,
+    selected: Int,
+    onSelected: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(label, style = MaterialTheme.typography.caption)
-        Spacer(Modifier.height(4.dp))
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            OutlinedButton(onClick = onDecrease, modifier = Modifier.width(48.dp).height(48.dp), contentPadding = PaddingValues(0.dp)) {
-                Text("−")
+    val options = remember(values) { values.toList() }
+    val initialIndex = options.indexOf(selected).coerceAtLeast(0)
+    val state = rememberLazyListState(initialFirstVisibleItemIndex = initialIndex)
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(selected, options) {
+        val selectedIndex = options.indexOf(selected)
+        if (selectedIndex >= 0 && !state.isScrollInProgress && state.firstVisibleItemIndex != selectedIndex) {
+            state.animateScrollToItem(selectedIndex)
+        }
+    }
+
+    LaunchedEffect(state, options) {
+        snapshotFlow { state.isScrollInProgress to state.firstVisibleItemIndex }
+            .collect { (scrolling, index) ->
+                if (!scrolling) options.getOrNull(index)?.let(onSelected)
             }
-            Text(value, modifier = Modifier.width(38.dp), textAlign = TextAlign.Center, style = MaterialTheme.typography.h6)
-            OutlinedButton(onClick = onIncrease, modifier = Modifier.width(48.dp).height(48.dp), contentPadding = PaddingValues(0.dp)) {
-                Text("＋")
+    }
+
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(label, style = MaterialTheme.typography.subtitle2)
+        Spacer(Modifier.height(4.dp))
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(200.dp)
+                .background(parseColor(LocalThemeColors.current.surfaceAlt), RoundedCornerShape(14.dp))
+                .border(1.dp, parseColor(LocalThemeColors.current.border), RoundedCornerShape(14.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            LazyColumn(
+                state = state,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(vertical = 76.dp),
+                flingBehavior = rememberSnapFlingBehavior(lazyListState = state),
+            ) {
+                itemsIndexed(options) { index, option ->
+                    val isSelected = option == selected
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .clickable {
+                                onSelected(option)
+                                scope.launch { state.animateScrollToItem(index) }
+                            }
+                            .background(
+                                if (isSelected) parseColor(LocalThemeColors.current.accent).copy(alpha = .18f)
+                                else Color.Transparent,
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            option.twoDigits(),
+                            style = if (isSelected) MaterialTheme.typography.h5 else MaterialTheme.typography.body1,
+                            color = parseColor(
+                                if (isSelected) LocalThemeColors.current.textPrimary else LocalThemeColors.current.textSecondary,
+                            ),
+                        )
+                    }
+                }
+            }
+            Column(
+                Modifier
+                    .align(Alignment.Center)
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .padding(horizontal = 8.dp),
+                verticalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Divider()
+                Divider()
             }
         }
     }

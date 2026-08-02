@@ -21,8 +21,8 @@ android {
         applicationId = "jp.oboegaki.app"
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
-        versionCode = 6
-        versionName = "0.1.5"
+        versionCode = 7
+        versionName = "0.1.6"
     }
     buildFeatures { buildConfig = true }
     packaging.resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"

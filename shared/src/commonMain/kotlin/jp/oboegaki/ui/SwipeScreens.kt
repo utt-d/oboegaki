@@ -4,7 +4,8 @@ import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -34,9 +35,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.input.pointer.PointerInputChange
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.platform.LocalDensity
@@ -61,9 +63,6 @@ import kotlinx.datetime.toLocalDateTime
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
-
-private enum class DragAxis { HORIZONTAL, VERTICAL }
-private enum class SwipeResult { RIGHT, LEFT, UP, DOWN }
 
 @Composable
 fun TodoScreen(
@@ -158,10 +157,6 @@ private fun SwipeDeck(
     var dragY by remember(item.id) { mutableFloatStateOf(0f) }
     var axis by remember(item.id) { mutableStateOf<DragAxis?>(null) }
     var animating by remember { mutableStateOf(false) }
-    var gestureHapticSent by remember(item.id) { mutableStateOf(false) }
-    var blockedHapticSent by remember(item.id) { mutableStateOf(false) }
-    val velocityTracker = remember(item.id) { VelocityTracker() }
-
     fun performHapticFeedback() {
         if (hapticsEnabled) {
             hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -178,11 +173,10 @@ private fun SwipeDeck(
         val verticalTransition = 205.dp
         val verticalTransitionPx = with(density) { verticalTransition.toPx() }
 
-        fun settle(result: SwipeResult?) {
+        fun settle(result: SwipeResult?, hapticAlreadySent: Boolean = false) {
             if (animating) return
-            if (result != null && !gestureHapticSent) {
+            if (result != null && !hapticAlreadySent) {
                 performHapticFeedback()
-                gestureHapticSent = true
             }
             animating = true
             scope.launch {
@@ -196,10 +190,20 @@ private fun SwipeDeck(
                     SwipeResult.DOWN -> verticalTransitionPx
                     else -> 0f
                 }
-                val duration = if (theme.motionStrength == jp.oboegaki.core.model.MotionStrength.NONE) 1
-                else (180 * theme.animationScale).roundToInt().coerceAtLeast(1)
                 val startX = dragX
                 val startY = dragY
+                val baseDuration = if (theme.motionStrength == jp.oboegaki.core.model.MotionStrength.NONE) 1
+                else (180 * theme.animationScale).roundToInt().coerceAtLeast(1)
+                val remainingDistance = when (result) {
+                    SwipeResult.RIGHT, SwipeResult.LEFT -> abs(targetX - startX)
+                    SwipeResult.UP, SwipeResult.DOWN -> abs(targetY - startY)
+                    null -> max(abs(startX), abs(startY))
+                }
+                val fullDistance = when (result ?: if (axis == DragAxis.VERTICAL) SwipeResult.UP else SwipeResult.RIGHT) {
+                    SwipeResult.RIGHT, SwipeResult.LEFT -> widthPx * 1.15f
+                    SwipeResult.UP, SwipeResult.DOWN -> verticalTransitionPx
+                }
+                val duration = SwipeGesturePhysics.settleDuration(baseDuration, remainingDistance, fullDistance)
                 animate(0f, 1f, animationSpec = tween(duration)) { value, _ ->
                     dragX = startX + (targetX - startX) * value
                     dragY = startY + (targetY - startY) * value
@@ -328,73 +332,112 @@ private fun SwipeDeck(
                     containerAlpha = lerpFloat(1f, .72f, verticalProgress),
                     highlightProgress = 0f,
                     zIndex = 2f * (1f - verticalProgress),
+                )
+
+                Box(
                     modifier = Modifier
+                        .fillMaxWidth()
+                        .height(centerHeight)
+                        .zIndex(4f)
                         .semantics {
                             customActions = accessibilityActions
                             onClick("編集") { onEdit(item); true }
                         }
                         .pointerInput(item.id, hasPrevious, hasNext, animating) {
-                            detectDragGestures(
-                                onDragStart = { point ->
-                                    if (!animating) {
-                                        axis = null
-                                        gestureHapticSent = false
-                                        blockedHapticSent = false
-                                        velocityTracker.resetTracking()
-                                        velocityTracker.addPosition(0, point)
+                            awaitEachGesture {
+                                val down = awaitFirstDown(requireUnconsumed = false)
+                                if (animating) {
+                                    do {
+                                        val event = awaitPointerEvent(PointerEventPass.Main)
+                                    } while (event.changes.any { it.pressed })
+                                    return@awaitEachGesture
+                                }
+
+                                val velocityTracker = VelocityTracker()
+                                velocityTracker.addPosition(down.uptimeMillis, Offset.Zero)
+                                val speed = with(density) { 900.dp.toPx() }
+                                val ownershipSlop = viewConfiguration.touchSlop
+                                var rawX = 0f
+                                var rawY = 0f
+                                var claimedByCard = false
+                                var gestureHapticSent = false
+                                var blockedHapticSent = false
+                                axis = null
+                                dragX = 0f
+                                dragY = 0f
+
+                                while (true) {
+                                    val event = awaitPointerEvent(PointerEventPass.Main)
+                                    val change = event.changes.firstOrNull { it.id == down.id }
+                                    if (change == null) {
+                                        settle(null)
+                                        break
                                     }
-                                },
-                                onDragCancel = { settle(null) },
-                                onDragEnd = {
-                                    val velocity = velocityTracker.calculateVelocity()
-                                    val speed = with(density) { 900.dp.toPx() }
-                                    val result = when (axis) {
-                                        DragAxis.HORIZONTAL -> when {
-                                            dragX > threshold || velocity.x > speed -> SwipeResult.RIGHT
-                                            dragX < -threshold || velocity.x < -speed -> SwipeResult.LEFT
-                                            else -> null
-                                        }
-                                        DragAxis.VERTICAL -> when {
-                                            (dragY < -threshold || velocity.y < -speed) && hasNext -> SwipeResult.UP
-                                            (dragY > threshold || velocity.y > speed) && hasPrevious -> SwipeResult.DOWN
-                                            else -> null
-                                        }
-                                        null -> null
+                                    val movement = change.position - change.previousPosition
+                                    rawX += movement.x
+                                    rawY += movement.y
+                                    velocityTracker.addPosition(change.uptimeMillis, Offset(rawX, rawY))
+
+                                    if (!claimedByCard && max(abs(rawX), abs(rawY)) >= ownershipSlop) {
+                                        claimedByCard = true
                                     }
-                                    settle(result)
-                                },
-                            ) { change: PointerInputChange, amount ->
-                                if (!animating) {
-                                    change.consume()
-                                    velocityTracker.addPosition(change.uptimeMillis, change.position)
-                                    if (axis == null && (abs(dragX + amount.x) > axisLock || abs(dragY + amount.y) > axisLock)) {
-                                        axis = if (abs(dragX + amount.x) >= abs(dragY + amount.y)) DragAxis.HORIZONTAL else DragAxis.VERTICAL
+                                    if (axis == null) {
+                                        axis = SwipeGesturePhysics.lockAxis(rawX, rawY, axisLock)
                                     }
+                                    if (claimedByCard) change.consume()
+
                                     when (axis) {
                                         DragAxis.HORIZONTAL -> {
-                                            dragX += amount.x * theme.cardFollow
-                                            if (!gestureHapticSent && abs(dragX) >= threshold) {
+                                            dragX = SwipeGesturePhysics.visualOffset(rawX, theme.cardFollow, widthPx * 1.15f)
+                                            dragY = 0f
+                                            if (!gestureHapticSent && abs(rawX) >= threshold) {
                                                 performHapticFeedback()
                                                 gestureHapticSent = true
                                             }
                                         }
                                         DragAxis.VERTICAL -> {
-                                            val candidate = dragY + amount.y * theme.cardFollow
-                                            val blocked = (candidate < 0 && !hasNext) || (candidate > 0 && !hasPrevious)
-                                            dragY = when {
-                                                candidate < 0 && !hasNext -> candidate.coerceAtLeast(-resistance)
-                                                candidate > 0 && !hasPrevious -> candidate.coerceAtMost(resistance)
-                                                else -> candidate
+                                            dragX = 0f
+                                            val blocked = (rawY < 0 && !hasNext) || (rawY > 0 && !hasPrevious)
+                                            dragY = if (blocked) {
+                                                SwipeGesturePhysics.visualOffset(rawY, theme.cardFollow, resistance)
+                                            } else {
+                                                SwipeGesturePhysics.visualOffset(rawY, theme.cardFollow, verticalTransitionPx)
                                             }
-                                            if (blocked && !blockedHapticSent && abs(candidate) >= resistance) {
+                                            if (blocked && !blockedHapticSent && abs(rawY) >= resistance) {
                                                 performHapticFeedback()
                                                 blockedHapticSent = true
-                                            } else if (!blocked && !gestureHapticSent && abs(dragY) >= threshold) {
+                                            } else if (!blocked && !gestureHapticSent && abs(rawY) >= threshold) {
                                                 performHapticFeedback()
                                                 gestureHapticSent = true
                                             }
                                         }
-                                        null -> { dragX += amount.x; dragY += amount.y }
+                                        null -> {
+                                            dragX = rawX * theme.cardFollow
+                                            dragY = rawY * theme.cardFollow
+                                        }
+                                    }
+
+                                    if (!change.pressed) {
+                                        if (axis == null && !claimedByCard) {
+                                            dragX = 0f
+                                            dragY = 0f
+                                            onEdit(item)
+                                        } else {
+                                            val velocity = velocityTracker.calculateVelocity()
+                                            val result = SwipeGesturePhysics.resolve(
+                                                axis = axis,
+                                                distanceX = rawX,
+                                                distanceY = rawY,
+                                                velocityX = velocity.x,
+                                                velocityY = velocity.y,
+                                                distanceThreshold = threshold,
+                                                velocityThreshold = speed,
+                                                hasPrevious = hasPrevious,
+                                                hasNext = hasNext,
+                                            )
+                                            settle(result, gestureHapticSent)
+                                        }
+                                        break
                                     }
                                 }
                             }

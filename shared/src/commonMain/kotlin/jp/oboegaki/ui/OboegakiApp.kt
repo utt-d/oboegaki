@@ -79,6 +79,7 @@ fun OboegakiApp(
     val message by controller.message.collectAsState()
     val theme = themes.firstOrNull { it.id == settings.selectedThemeId } ?: BuiltInThemes.standard
     val icons = theme.icons
+    val tabOrder = navigationTabs(settings.navigationButtonOrder)
     val tabSwipeThreshold = with(LocalDensity.current) { 56.dp.toPx() }
     val tabTransitionDuration = if (settings.reducedMotion) {
         1
@@ -111,9 +112,11 @@ fun OboegakiApp(
             return
         }
         val source = tab
+        val sourceIndex = tabOrder.indexOf(source)
+        val targetIndex = tabOrder.indexOf(target)
         tabTransitionJob?.cancel()
         tabTransitionJob = scope.launch {
-            val targetOffset = -(target.ordinal - source.ordinal) * tabViewportWidth.toFloat()
+            val targetOffset = -(targetIndex - sourceIndex) * tabViewportWidth.toFloat()
             val startOffset = tabOffset
             val distance = abs(targetOffset - startOffset)
             animate(
@@ -130,9 +133,9 @@ fun OboegakiApp(
     fun settleTabSwipe(distance: Float) {
         val source = tab
         val direction = if (distance < 0f) 1 else -1
-        val candidateOrdinal = source.ordinal + direction
-        val target = if (abs(distance) >= tabSwipeThreshold && candidateOrdinal in MainTab.values().indices) {
-            MainTab.values()[candidateOrdinal]
+        val candidateIndex = tabOrder.indexOf(source) + direction
+        val target = if (abs(distance) >= tabSwipeThreshold && candidateIndex in tabOrder.indices) {
+            tabOrder[candidateIndex]
         } else {
             source
         }
@@ -251,8 +254,9 @@ fun OboegakiApp(
                                 tabOffset = 0f
                             },
                             onDrag = { distance ->
-                                val minimum = if (tab.ordinal < MainTab.ALL.ordinal) -tabViewportWidth.toFloat() else 0f
-                                val maximum = if (tab.ordinal > MainTab.TODOS.ordinal) tabViewportWidth.toFloat() else 0f
+                                val currentIndex = tabOrder.indexOf(tab)
+                                val minimum = if (currentIndex < tabOrder.lastIndex) -tabViewportWidth.toFloat() else 0f
+                                val maximum = if (currentIndex > 0) tabViewportWidth.toFloat() else 0f
                                 tabOffset = distance.coerceIn(minimum, maximum)
                             },
                             onEnd = ::settleTabSwipe,
@@ -265,9 +269,9 @@ fun OboegakiApp(
                     if (tabViewportWidth == 0) {
                         TabScreen(tab, sections, todoIndex, memoIndex, settings, controller)
                     } else {
-                        MainTab.values().forEach { pageTab ->
+                        tabOrder.forEachIndexed { pageIndex, pageTab ->
                             key(pageTab) {
-                                val pageBaseOffset = (pageTab.ordinal - tab.ordinal) * tabViewportWidth
+                                val pageBaseOffset = (pageIndex - tabOrder.indexOf(tab)) * tabViewportWidth
                                 Box(
                                     Modifier
                                         .fillMaxSize()
@@ -420,6 +424,15 @@ private fun Modifier.trackHorizontalTabSwipe(
 
 private fun <T> normalizedButtonOrder(value: List<T>, defaults: List<T>): List<T> =
     value.filter { it in defaults }.distinct() + defaults.filterNot { it in value }
+
+internal fun navigationTabs(value: List<MainNavigationButton>): List<MainTab> =
+    normalizedButtonOrder(value, MainNavigationButton.values().toList()).map {
+        when (it) {
+            MainNavigationButton.TODOS -> MainTab.TODOS
+            MainNavigationButton.MEMOS -> MainTab.MEMOS
+            MainNavigationButton.ALL -> MainTab.ALL
+        }
+    }
 
 @Composable
 private fun androidx.compose.foundation.layout.RowScope.BottomNavItem(
