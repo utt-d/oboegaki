@@ -90,6 +90,8 @@ fun OboegakiApp(
     var tabViewportWidth by remember { mutableIntStateOf(0) }
     var tabTransitionJob by remember { mutableStateOf<Job?>(null) }
 
+    PlatformBackHandler(enabled = overlay != null, onBack = controller::closeOverlay)
+
     fun performHapticFeedback() {
         if (settings.hapticsEnabled) {
             hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)

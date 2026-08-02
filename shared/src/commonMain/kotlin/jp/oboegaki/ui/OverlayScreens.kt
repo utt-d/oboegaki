@@ -57,6 +57,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.window.Dialog
 import jp.oboegaki.core.model.AllSections
 import jp.oboegaki.core.model.AppItem
 import jp.oboegaki.core.model.AppSettings
@@ -66,11 +67,13 @@ import jp.oboegaki.core.model.RelationType
 import jp.oboegaki.core.model.ThemeDefinition
 import jp.oboegaki.core.model.TodoDetail
 import kotlinx.datetime.Instant
+import kotlinx.datetime.LocalDate
 import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toInstant
 import kotlinx.datetime.toLocalDateTime
 import kotlin.math.roundToInt
+import kotlin.time.Clock
 
 @Composable
 fun OverlayHost(
@@ -227,9 +230,9 @@ private fun AddScreen(
     var body by remember { mutableStateOf("") }
     var priority by remember { mutableStateOf(Priority.NONE) }
     var estimated by remember { mutableStateOf("15") }
-    var available by remember { mutableStateOf("") }
-    var scheduled by remember { mutableStateOf("") }
-    var due by remember { mutableStateOf("") }
+    var available by remember { mutableStateOf<Long?>(null) }
+    var scheduled by remember { mutableStateOf<Long?>(null) }
+    var due by remember { mutableStateOf<Long?>(null) }
     val prerequisites = remember { mutableStateListOf<String>() }
 
     fun submit() {
@@ -241,9 +244,9 @@ private fun AddScreen(
                         todo = item.todo?.copy(
                             priority = priority,
                             estimatedMinutes = estimated.toIntOrNull()?.coerceIn(1, 1440),
-                            availableFromEpochMillis = parseInputDate(available),
-                            scheduledAtEpochMillis = parseInputDate(scheduled),
-                            dueAtEpochMillis = parseInputDate(due),
+                            availableFromEpochMillis = available,
+                            scheduledAtEpochMillis = scheduled,
+                            dueAtEpochMillis = due,
                         ),
                     ),
                     prerequisites.toSet(),
@@ -362,10 +365,9 @@ private fun AddScreen(
                     )
                 }
                 item {
-                    Text("日時は 2026-08-01 14:30 の形式", style = MaterialTheme.typography.caption)
-                    DateField("いつからできる？", available) { available = it }
-                    DateField("行う時刻", scheduled) { scheduled = it }
-                    DateField("期限", due) { due = it }
+                    DateTimeField("いつからできる？", available) { available = it }
+                    DateTimeField("行う時刻", scheduled) { scheduled = it }
+                    DateTimeField("期限", due) { due = it }
                 }
             }
             item {
@@ -397,9 +399,9 @@ private fun EditScreen(
     var body by remember(source.id) { mutableStateOf(source.body) }
     var priority by remember(source.id) { mutableStateOf(source.todo?.priority ?: Priority.NONE) }
     var estimated by remember(source.id) { mutableStateOf(source.todo?.estimatedMinutes?.toString() ?: "") }
-    var available by remember(source.id) { mutableStateOf(formatInputDate(source.todo?.availableFromEpochMillis)) }
-    var scheduled by remember(source.id) { mutableStateOf(formatInputDate(source.todo?.scheduledAtEpochMillis)) }
-    var due by remember(source.id) { mutableStateOf(formatInputDate(source.todo?.dueAtEpochMillis)) }
+    var available by remember(source.id) { mutableStateOf(source.todo?.availableFromEpochMillis) }
+    var scheduled by remember(source.id) { mutableStateOf(source.todo?.scheduledAtEpochMillis) }
+    var due by remember(source.id) { mutableStateOf(source.todo?.dueAtEpochMillis) }
     val prerequisites = remember(source.id, relations) {
         mutableStateListOf<String>().apply {
             addAll(relations.filter { it.toItemId == source.id && it.type == RelationType.REQUIRED_BEFORE }.map { it.fromItemId })
@@ -410,9 +412,9 @@ private fun EditScreen(
         val detail = if (kind == ItemKind.TODO) (source.todo ?: TodoDetail()).copy(
             priority = priority,
             estimatedMinutes = estimated.toIntOrNull()?.coerceIn(1, 1440),
-            availableFromEpochMillis = parseInputDate(available),
-            scheduledAtEpochMillis = parseInputDate(scheduled),
-            dueAtEpochMillis = parseInputDate(due),
+            availableFromEpochMillis = available,
+            scheduledAtEpochMillis = scheduled,
+            dueAtEpochMillis = due,
         ) else null
         return source.copy(kind = kind, title = title, body = body, todo = detail)
     }
@@ -479,13 +481,12 @@ private fun EditScreen(
                     )
                 }
                 item {
-                    Text("日時は 2026-08-01 14:30 の形式", style = MaterialTheme.typography.caption)
-                    DateField("いつからできる？", available) { available = it }
-                    DateField("行う時刻", scheduled) { scheduled = it }
-                    DateField("期限", due) { due = it }
+                    DateTimeField("いつからできる？", available) { available = it }
+                    DateTimeField("行う時刻", scheduled) { scheduled = it }
+                    DateTimeField("期限", due) { due = it }
                 }
                 if (settings.calendarIntegrationEnabled) item {
-                    val hasCalendarDate = scheduled.isNotBlank() || due.isNotBlank() || available.isNotBlank()
+                    val hasCalendarDate = scheduled != null || due != null || available != null
                     OutlinedButton(
                         onClick = { controller.addToCalendar(draftItem()) },
                         enabled = title.isNotBlank() && hasCalendarDate,
@@ -539,11 +540,242 @@ private fun EditScreen(
 }
 
 @Composable
-private fun DateField(label: String, value: String, onChange: (String) -> Unit) {
-    OutlinedTextField(
-        value, onChange, Modifier.fillMaxWidth().padding(top = 8.dp), label = { Text(label) },
-        placeholder = { Text("設定なし") }, singleLine = true,
-    )
+private fun DateTimeField(label: String, value: Long?, onChange: (Long?) -> Unit) {
+    var selectingDate by remember { mutableStateOf(false) }
+    var selectingTime by remember { mutableStateOf(false) }
+    val local = value?.let {
+        Instant.fromEpochMilliseconds(it).toLocalDateTime(TimeZone.currentSystemDefault())
+    }
+
+    Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+        Text(label, style = MaterialTheme.typography.subtitle1)
+        Spacer(Modifier.height(6.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(
+                onClick = { selectingDate = true },
+                modifier = Modifier.weight(1.25f).height(52.dp),
+            ) {
+                Text(local?.let(::formatDatePart) ?: "日付を選ぶ", textAlign = TextAlign.Center)
+            }
+            OutlinedButton(
+                onClick = { selectingTime = true },
+                modifier = Modifier.weight(1f).height(52.dp),
+            ) {
+                Text(local?.let(::formatTimePart) ?: "時刻を選ぶ", textAlign = TextAlign.Center)
+            }
+        }
+        if (value == null) {
+            Text(
+                "設定なし",
+                style = MaterialTheme.typography.caption,
+                color = parseColor(LocalThemeColors.current.textSecondary),
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        } else {
+            TextButton(onClick = { onChange(null) }, modifier = Modifier.align(Alignment.End).height(42.dp)) {
+                Text("日時を解除")
+            }
+        }
+    }
+
+    if (selectingDate) {
+        CalendarDatePickerDialog(
+            label = label,
+            value = value,
+            onDismiss = { selectingDate = false },
+            onConfirm = {
+                onChange(replaceDate(value, it))
+                selectingDate = false
+            },
+        )
+    }
+    if (selectingTime) {
+        ClockTimePickerDialog(
+            label = label,
+            value = value,
+            onDismiss = { selectingTime = false },
+            onConfirm = { hour, minute ->
+                onChange(replaceTime(value, hour, minute))
+                selectingTime = false
+            },
+        )
+    }
+}
+
+@Composable
+private fun CalendarDatePickerDialog(
+    label: String,
+    value: Long?,
+    onDismiss: () -> Unit,
+    onConfirm: (LocalDate) -> Unit,
+) {
+    val initial = localDateTime(value)
+    var year by remember(value) { mutableStateOf(initial.year) }
+    var month by remember(value) { mutableStateOf(initial.monthNumber) }
+    var selectedDay by remember(value) { mutableStateOf(initial.dayOfMonth) }
+
+    fun moveMonth(amount: Int) {
+        val shifted = year * 12 + month - 1 + amount
+        year = shifted / 12
+        month = shifted % 12 + 1
+        selectedDay = selectedDay.coerceAtMost(daysInMonth(year, month))
+    }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colors.background,
+            elevation = 24.dp,
+        ) {
+            Column(Modifier.padding(18.dp)) {
+                Text("${label}の日付", style = MaterialTheme.typography.h6)
+                Spacer(Modifier.height(12.dp))
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedButton(onClick = { moveMonth(-1) }, modifier = Modifier.height(44.dp)) { Text("前月") }
+                    Text(
+                        "$year 年 $month 月",
+                        modifier = Modifier.weight(1f),
+                        textAlign = TextAlign.Center,
+                        style = MaterialTheme.typography.subtitle1,
+                    )
+                    OutlinedButton(onClick = { moveMonth(1) }, modifier = Modifier.height(44.dp)) { Text("次月") }
+                }
+                Spacer(Modifier.height(10.dp))
+                Row(Modifier.fillMaxWidth()) {
+                    listOf("月", "火", "水", "木", "金", "土", "日").forEach {
+                        Text(it, Modifier.weight(1f), textAlign = TextAlign.Center, style = MaterialTheme.typography.caption)
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
+                val firstOffset = LocalDate(year, month, 1).dayOfWeek.ordinal
+                val dayCount = daysInMonth(year, month)
+                repeat(6) { week ->
+                    Row(Modifier.fillMaxWidth()) {
+                        repeat(7) { weekday ->
+                            val day = week * 7 + weekday - firstOffset + 1
+                            if (day in 1..dayCount) {
+                                val modifier = Modifier.weight(1f).height(42.dp)
+                                if (day == selectedDay) {
+                                    Button(onClick = { selectedDay = day }, modifier = modifier, contentPadding = PaddingValues(0.dp)) {
+                                        Text(day.toString())
+                                    }
+                                } else {
+                                    TextButton(onClick = { selectedDay = day }, modifier = modifier, contentPadding = PaddingValues(0.dp)) {
+                                        Text(day.toString())
+                                    }
+                                }
+                            } else {
+                                Spacer(Modifier.weight(1f).height(42.dp))
+                            }
+                        }
+                    }
+                }
+                Divider(Modifier.padding(top = 8.dp))
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f).height(50.dp)) { Text("キャンセル") }
+                    Button(
+                        onClick = { onConfirm(LocalDate(year, month, selectedDay)) },
+                        modifier = Modifier.weight(1f).height(50.dp),
+                    ) { Text("この日を選ぶ") }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ClockTimePickerDialog(
+    label: String,
+    value: Long?,
+    onDismiss: () -> Unit,
+    onConfirm: (Int, Int) -> Unit,
+) {
+    val initial = localDateTime(value)
+    var hour by remember(value) { mutableStateOf(initial.hour) }
+    var minute by remember(value) { mutableStateOf(initial.minute) }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colors.background,
+            elevation = 24.dp,
+        ) {
+            Column(Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("${label}の時刻", style = MaterialTheme.typography.h6, modifier = Modifier.fillMaxWidth())
+                Spacer(Modifier.height(20.dp))
+                Text(
+                    "${hour.twoDigits()}:${minute.twoDigits()}",
+                    style = MaterialTheme.typography.h4,
+                )
+                Spacer(Modifier.height(18.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    TimeStepper(
+                        label = "時",
+                        value = hour.twoDigits(),
+                        onDecrease = { hour = (hour + 23) % 24 },
+                        onIncrease = { hour = (hour + 1) % 24 },
+                        modifier = Modifier.weight(1f),
+                    )
+                    TimeStepper(
+                        label = "分",
+                        value = minute.twoDigits(),
+                        onDecrease = { minute = (minute + 55) % 60 },
+                        onIncrease = { minute = (minute + 5) % 60 },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                Spacer(Modifier.height(16.dp))
+                Text("よく使う時刻", style = MaterialTheme.typography.subtitle2, modifier = Modifier.fillMaxWidth())
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf(9 to 0, 12 to 0, 18 to 0).forEach { (quickHour, quickMinute) ->
+                        OutlinedButton(
+                            onClick = { hour = quickHour; minute = quickMinute },
+                            modifier = Modifier.weight(1f).height(44.dp),
+                            contentPadding = PaddingValues(horizontal = 4.dp),
+                        ) { Text("${quickHour.twoDigits()}:${quickMinute.twoDigits()}") }
+                    }
+                }
+                Divider(Modifier.padding(top = 18.dp))
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f).height(50.dp)) { Text("キャンセル") }
+                    Button(onClick = { onConfirm(hour, minute) }, modifier = Modifier.weight(1f).height(50.dp)) {
+                        Text("この時刻を選ぶ")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TimeStepper(
+    label: String,
+    value: String,
+    onDecrease: () -> Unit,
+    onIncrease: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(label, style = MaterialTheme.typography.caption)
+        Spacer(Modifier.height(4.dp))
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            OutlinedButton(onClick = onDecrease, modifier = Modifier.width(48.dp).height(48.dp), contentPadding = PaddingValues(0.dp)) {
+                Text("−")
+            }
+            Text(value, modifier = Modifier.width(38.dp), textAlign = TextAlign.Center, style = MaterialTheme.typography.h6)
+            OutlinedButton(onClick = onIncrease, modifier = Modifier.width(48.dp).height(48.dp), contentPadding = PaddingValues(0.dp)) {
+                Text("＋")
+            }
+        }
+    }
 }
 
 @Composable
@@ -601,15 +833,38 @@ private fun MissingOverlay(controller: AppController) {
 private fun allVisibleItems(sections: AllSections) =
     sections.unsorted + sections.todos + sections.memos + sections.completed + sections.archived
 
-private fun formatInputDate(epoch: Long?): String {
-    if (epoch == null) return ""
-    val value = Instant.fromEpochMilliseconds(epoch).toLocalDateTime(TimeZone.currentSystemDefault())
-    return "${value.year}-${value.monthNumber.toString().padStart(2, '0')}-${value.dayOfMonth.toString().padStart(2, '0')} ${value.hour.toString().padStart(2, '0')}:${value.minute.toString().padStart(2, '0')}"
+private fun localDateTime(epoch: Long?): LocalDateTime {
+    val instant = epoch?.let(Instant::fromEpochMilliseconds)
+        ?: Instant.fromEpochMilliseconds(Clock.System.now().toEpochMilliseconds())
+    return instant.toLocalDateTime(TimeZone.currentSystemDefault())
 }
 
-private fun parseInputDate(value: String): Long? {
-    if (value.isBlank()) return null
-    return runCatching {
-        LocalDateTime.parse(value.trim().replace(' ', 'T')).toInstant(TimeZone.currentSystemDefault()).toEpochMilliseconds()
-    }.getOrNull()
+private fun replaceDate(epoch: Long?, date: LocalDate): Long {
+    val current = localDateTime(epoch)
+    val hour = if (epoch == null) 9 else current.hour
+    val minute = if (epoch == null) 0 else current.minute
+    return LocalDateTime(date.year, date.monthNumber, date.dayOfMonth, hour, minute)
+        .toInstant(TimeZone.currentSystemDefault())
+        .toEpochMilliseconds()
+}
+
+private fun replaceTime(epoch: Long?, hour: Int, minute: Int): Long {
+    val current = localDateTime(epoch)
+    return LocalDateTime(current.year, current.monthNumber, current.dayOfMonth, hour, minute)
+        .toInstant(TimeZone.currentSystemDefault())
+        .toEpochMilliseconds()
+}
+
+private fun formatDatePart(value: LocalDateTime): String =
+    "${value.year}/${value.monthNumber.twoDigits()}/${value.dayOfMonth.twoDigits()}"
+
+private fun formatTimePart(value: LocalDateTime): String =
+    "${value.hour.twoDigits()}:${value.minute.twoDigits()}"
+
+private fun Int.twoDigits(): String = toString().padStart(2, '0')
+
+private fun daysInMonth(year: Int, month: Int): Int = when (month) {
+    2 -> if (year % 400 == 0 || year % 4 == 0 && year % 100 != 0) 29 else 28
+    4, 6, 9, 11 -> 30
+    else -> 31
 }

@@ -66,6 +66,7 @@ class AppController(
     private var undoJob: Job? = null
     private var messageJob: Job? = null
     private var initialGuideResolved = false
+    private val overlayHistory = OverlayBackStack()
 
     init {
         scope.launch {
@@ -104,25 +105,36 @@ class AppController(
             MainTab.MEMOS -> ItemKind.MEMO
             MainTab.ALL -> ItemKind.UNSORTED
         }
-        _overlay.value = AppOverlay.Add(kind)
+        openOverlay(AppOverlay.Add(kind))
     }
-    fun openEdit(id: String) { _overlay.value = AppOverlay.Edit(id) }
-    fun openSettings() { _overlay.value = AppOverlay.Settings }
-    fun openThemes() { _overlay.value = AppOverlay.Themes }
-    fun openThemeEditor(theme: ThemeDefinition) { _overlay.value = AppOverlay.ThemeEditor(theme) }
-    fun openDataTools() { _overlay.value = AppOverlay.DataTools }
-    fun openOperationGuide() { _overlay.value = AppOverlay.OperationGuide(firstLaunch = false) }
+    fun openEdit(id: String) { openOverlay(AppOverlay.Edit(id)) }
+    fun openSettings() { openOverlay(AppOverlay.Settings) }
+    fun openThemes() { openOverlay(AppOverlay.Themes) }
+    fun openThemeEditor(theme: ThemeDefinition) { openOverlay(AppOverlay.ThemeEditor(theme)) }
+    fun openDataTools() { openOverlay(AppOverlay.DataTools) }
+    fun openOperationGuide() { openOverlay(AppOverlay.OperationGuide(firstLaunch = false)) }
     fun saveSettingsAndOpenOperationGuide(value: AppSettings) = scope.launch {
         repository.saveSettings(value)
-        _overlay.value = AppOverlay.OperationGuide(firstLaunch = false)
+        openOverlay(AppOverlay.OperationGuide(firstLaunch = false))
     }
     fun finishOperationGuide(firstLaunch: Boolean) = scope.launch {
         if (!_settings.value.operationGuideSeen) {
             repository.saveSettings(_settings.value.copy(operationGuideSeen = true))
         }
-        _overlay.value = if (firstLaunch) null else AppOverlay.Settings
+        if (firstLaunch) dismissOverlays() else closeOverlay()
     }
-    fun closeOverlay() { _overlay.value = null }
+    fun closeOverlay() {
+        _overlay.value = overlayHistory.back()
+    }
+
+    private fun openOverlay(value: AppOverlay) {
+        _overlay.value = overlayHistory.open(_overlay.value, value)
+    }
+
+    private fun dismissOverlays() {
+        overlayHistory.clear()
+        _overlay.value = null
+    }
 
     fun quickAdd(kind: ItemKind, text: String, onAdded: (AppItem) -> Unit = {}) = scope.launch {
         val item = repository.quickAdd(kind, text)
@@ -263,7 +275,7 @@ class AppController(
         when (val result = repository.saveTheme(theme)) {
             is ThemeValidation.Valid -> {
                 repository.saveSettings(_settings.value.copy(selectedThemeId = theme.id))
-                _overlay.value = AppOverlay.Themes
+                if (_overlay.value is AppOverlay.ThemeEditor) closeOverlay() else openOverlay(AppOverlay.Themes)
                 showMessage(if (result.warnings.isEmpty()) "テーマを保存しました" else "保存しました。コントラスト警告があります")
             }
             is ThemeValidation.Invalid -> showMessage(result.message)
