@@ -47,6 +47,7 @@ import jp.oboegaki.core.model.ItemKind
 fun AllItemsScreen(
     sections: AllSections,
     addButtonPosition: AddButtonPosition,
+    addButtonBottomOffsetDp: Int,
     controller: AppController,
 ) {
     val expanded = remember { mutableStateMapOf(
@@ -57,20 +58,25 @@ fun AllItemsScreen(
         contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 14.dp, end = 14.dp, top = 4.dp, bottom = 100.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        section("あとで分ける", "unsorted", sections.unsorted, expanded, controller, reorderable = true)
-        section("やること", "todos", sections.todos, expanded, controller, reorderable = true)
-        section("メモ", "memos", sections.memos, expanded, controller, reorderable = true)
-        section("完了したこと", "completed", sections.completed, expanded, controller, reorderable = false, restoreLabel = "やることへ戻す")
-        section("しまったメモ", "archived", sections.archived, expanded, controller, reorderable = false, restoreLabel = "メモへ戻す")
+        section("あとで分ける", "unsorted", sections.unsorted, expanded, controller, addButtonPosition, reorderable = true)
+        section("やること", "todos", sections.todos, expanded, controller, addButtonPosition, reorderable = true)
+        section("メモ", "memos", sections.memos, expanded, controller, addButtonPosition, reorderable = true)
+        section("完了したこと", "completed", sections.completed, expanded, controller, addButtonPosition, reorderable = false, restoreLabel = "やることへ戻す")
+        section("しまったメモ", "archived", sections.archived, expanded, controller, addButtonPosition, reorderable = false, restoreLabel = "メモへ戻す")
         item {
             Spacer(Modifier.height(88.dp))
             OutlinedButton(
                 onClick = controller::openDataTools,
                 modifier = Modifier
-                    .fillMaxWidth()
+                    .fillMaxWidth(if (addButtonPosition == AddButtonPosition.CENTER) .45f else 1f)
                     .padding(
                         start = if (addButtonPosition == AddButtonPosition.LEFT) 82.dp else 0.dp,
                         end = if (addButtonPosition == AddButtonPosition.RIGHT) 82.dp else 0.dp,
+                        bottom = if (addButtonPosition == AddButtonPosition.CENTER) {
+                            (82 + addButtonBottomOffsetDp.coerceIn(0, 160)).dp
+                        } else {
+                            0.dp
+                        },
                     )
                     .height(48.dp),
             ) {
@@ -86,6 +92,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.section(
     values: List<AppItem>,
     expanded: MutableMap<String, Boolean>,
     controller: AppController,
+    addButtonPosition: AddButtonPosition,
     reorderable: Boolean,
     restoreLabel: String? = null,
 ) {
@@ -105,7 +112,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.section(
             Text("項目はありません", Modifier.fillMaxWidth().padding(14.dp), color = parseColor(LocalThemeColors.current.textSecondary))
         }
         itemsIndexed(values, key = { _, item -> "$key-${item.id}" }) { index, item ->
-            AllItemRow(item, index, values.size, reorderable, restoreLabel, controller)
+            AllItemRow(item, index, values.size, reorderable, restoreLabel, addButtonPosition, controller)
         }
     }
 }
@@ -117,6 +124,7 @@ private fun AllItemRow(
     count: Int,
     reorderable: Boolean,
     restoreLabel: String?,
+    addButtonPosition: AddButtonPosition,
     controller: AppController,
 ) {
     val theme = LocalAppTheme.current
@@ -175,7 +183,12 @@ private fun AllItemRow(
                 TextButton(onClick = { controller.openEdit(item.id) }, modifier = Modifier.height(48.dp)) { Text("${theme.icons.edit} 編集") }
             }
             restoreLabel?.let {
-                OutlinedButton(onClick = { controller.restore(item.id) }, Modifier.fillMaxWidth().height(48.dp)) { Text(it) }
+                OutlinedButton(
+                    onClick = { controller.restore(item.id) },
+                    modifier = Modifier
+                        .fillMaxWidth(if (addButtonPosition == AddButtonPosition.CENTER) .45f else 1f)
+                        .height(48.dp),
+                ) { Text(it) }
             }
         }
     }

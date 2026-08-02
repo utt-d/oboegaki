@@ -71,6 +71,7 @@ fun TodoScreen(
     focusedIndex: Int,
     hapticsEnabled: Boolean,
     addButtonPosition: AddButtonPosition,
+    addButtonBottomOffsetDp: Int,
     controller: AppController,
 ) {
     val icons = LocalAppTheme.current.icons
@@ -89,6 +90,7 @@ fun TodoScreen(
         onEdit = { controller.openEdit(it.id) },
         hapticsEnabled = hapticsEnabled,
         addButtonPosition = addButtonPosition,
+        addButtonBottomOffsetDp = addButtonBottomOffsetDp,
     )
 }
 
@@ -98,6 +100,7 @@ fun MemoScreen(
     focusedIndex: Int,
     hapticsEnabled: Boolean,
     addButtonPosition: AddButtonPosition,
+    addButtonBottomOffsetDp: Int,
     controller: AppController,
 ) {
     val icons = LocalAppTheme.current.icons
@@ -116,6 +119,7 @@ fun MemoScreen(
         onEdit = { controller.openEdit(it.id) },
         hapticsEnabled = hapticsEnabled,
         addButtonPosition = addButtonPosition,
+        addButtonBottomOffsetDp = addButtonBottomOffsetDp,
     )
 }
 
@@ -135,6 +139,7 @@ private fun SwipeDeck(
     onEdit: (AppItem) -> Unit,
     hapticsEnabled: Boolean,
     addButtonPosition: AddButtonPosition,
+    addButtonBottomOffsetDp: Int,
 ) {
     if (items.isEmpty()) {
         EmptyDeck(kind)
@@ -404,6 +409,11 @@ private fun SwipeDeck(
                     .padding(
                         start = if (addButtonPosition == AddButtonPosition.LEFT) 88.dp else 0.dp,
                         end = if (addButtonPosition == AddButtonPosition.RIGHT) 88.dp else 0.dp,
+                        bottom = if (addButtonPosition == AddButtonPosition.CENTER) {
+                            (88 + addButtonBottomOffsetDp.coerceIn(0, 160)).dp
+                        } else {
+                            0.dp
+                        },
                     )
                     .height(48.dp),
             ) { Text("${theme.icons.edit} 編集") }

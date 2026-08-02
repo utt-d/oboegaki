@@ -43,9 +43,11 @@ import jp.oboegaki.core.domain.ThemePolicy
 import jp.oboegaki.core.model.AppearanceMode
 import jp.oboegaki.core.model.AddButtonPosition
 import jp.oboegaki.core.model.AppSettings
+import jp.oboegaki.core.model.MainNavigationButton
 import jp.oboegaki.core.model.MotionStrength
 import jp.oboegaki.core.model.ThemeColors
 import jp.oboegaki.core.model.ThemeDefinition
+import jp.oboegaki.core.model.TopActionButton
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlin.math.roundToInt
@@ -63,11 +65,16 @@ fun SettingsScreen(settings: AppSettings, controller: AppController) {
             item { SectionTitle("操作") }
             item { SettingSwitch("触覚フィードバック", draft.hapticsEnabled) { draft = draft.copy(hapticsEnabled = it) } }
             item { SettingSwitch("Enterで追加", draft.addWithEnter) { draft = draft.copy(addWithEnter = it) } }
+            item { SectionTitle("ボタン配置") }
             item {
-                Text("追加ボタンの位置", style = MaterialTheme.typography.subtitle1)
+                Text("追加ボタンの横位置", style = MaterialTheme.typography.subtitle1)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     AddButtonPosition.values().forEach { position ->
-                        val label = if (position == AddButtonPosition.LEFT) "左下" else "右下"
+                        val label = when (position) {
+                            AddButtonPosition.LEFT -> "左"
+                            AddButtonPosition.CENTER -> "中央"
+                            AddButtonPosition.RIGHT -> "右"
+                        }
                         if (draft.addButtonPosition == position) {
                             Button(
                                 onClick = { draft = draft.copy(addButtonPosition = position) },
@@ -81,6 +88,65 @@ fun SettingsScreen(settings: AppSettings, controller: AppController) {
                         }
                     }
                 }
+            }
+            item {
+                ValueSlider(
+                    label = "追加ボタンの高さ",
+                    valueLabel = "下端から ${draft.addButtonBottomOffsetDp}dp",
+                    value = draft.addButtonBottomOffsetDp.toFloat(),
+                    range = 0f..160f,
+                    steps = 7,
+                ) { draft = draft.copy(addButtonBottomOffsetDp = it.roundToInt()) }
+            }
+            item {
+                val order = normalizedOrder(
+                    draft.navigationButtonOrder,
+                    MainNavigationButton.values().toList(),
+                )
+                ButtonOrderEditor(
+                    title = "画面切り替えボタン",
+                    description = "下側に並べる順番を変更できます。",
+                    order = order,
+                    label = {
+                        when (it) {
+                            MainNavigationButton.TODOS -> "やること"
+                            MainNavigationButton.MEMOS -> "メモ"
+                            MainNavigationButton.ALL -> "すべて"
+                        }
+                    },
+                    onOrderChange = { draft = draft.copy(navigationButtonOrder = it) },
+                )
+            }
+            item {
+                val order = normalizedOrder(
+                    draft.topActionButtonOrder,
+                    TopActionButton.values().toList(),
+                )
+                ButtonOrderEditor(
+                    title = "上部の操作ボタン",
+                    description = "「すべて」画面の右上に並べる順番を変更できます。",
+                    order = order,
+                    label = {
+                        when (it) {
+                            TopActionButton.THEMES -> "テーマ"
+                            TopActionButton.SETTINGS -> "設定"
+                        }
+                    },
+                    onOrderChange = { draft = draft.copy(topActionButtonOrder = it) },
+                )
+            }
+            item {
+                OutlinedButton(
+                    onClick = {
+                        draft = draft.copy(
+                            addButtonPosition = AddButtonPosition.LEFT,
+                            addButtonBottomOffsetDp = 8,
+                            navigationButtonOrder = MainNavigationButton.values().toList(),
+                            topActionButtonOrder = TopActionButton.values().toList(),
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                ) { Text("ボタン配置を標準に戻す") }
             }
             item {
                 SettingSwitch("空きスペースの左右スワイプで画面を切り替える", draft.tabSwipeEnabled) {
@@ -153,6 +219,53 @@ fun SettingsScreen(settings: AppSettings, controller: AppController) {
 }
 
 @Composable
+private fun <T> ButtonOrderEditor(
+    title: String,
+    description: String,
+    order: List<T>,
+    label: (T) -> String,
+    onOrderChange: (List<T>) -> Unit,
+) {
+    Text(title, style = MaterialTheme.typography.subtitle1, fontWeight = FontWeight.Bold)
+    Text(
+        description,
+        style = MaterialTheme.typography.caption,
+        color = parseColor(LocalThemeColors.current.textSecondary),
+    )
+    Spacer(Modifier.height(6.dp))
+    order.forEachIndexed { index, button ->
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text("${index + 1}. ${label(button)}", modifier = Modifier.weight(1f))
+            OutlinedButton(
+                onClick = { onOrderChange(moveInList(order, index, index - 1)) },
+                enabled = index > 0,
+                modifier = Modifier.width(56.dp).height(48.dp),
+            ) { Text("←") }
+            OutlinedButton(
+                onClick = { onOrderChange(moveInList(order, index, index + 1)) },
+                enabled = index < order.lastIndex,
+                modifier = Modifier.width(56.dp).height(48.dp),
+            ) { Text("→") }
+        }
+    }
+}
+
+private fun <T> normalizedOrder(value: List<T>, defaults: List<T>): List<T> =
+    value.filter { it in defaults }.distinct() + defaults.filterNot { it in value }
+
+private fun <T> moveInList(values: List<T>, from: Int, to: Int): List<T> {
+    if (from !in values.indices || to !in values.indices || from == to) return values
+    return values.toMutableList().apply {
+        val moved = removeAt(from)
+        add(to, moved)
+    }
+}
+
+@Composable
 fun OperationGuideScreen(firstLaunch: Boolean, controller: AppController) {
     val icons = LocalAppTheme.current.icons
     OverlayScaffold(
@@ -186,7 +299,7 @@ fun OperationGuideScreen(firstLaunch: Boolean, controller: AppController) {
                         title = "まず追加する",
                         points = listOf(
                             "画面左下の追加ボタンを押します。",
-                            "追加ボタンは、設定から右下へ移動できます。",
+                            "追加ボタンは、設定から横位置と高さを変更できます。",
                             "ハンドルを上へ引くと詳細が開き、下へ引くと閉じます。",
                         ),
                     )
@@ -230,7 +343,7 @@ fun OperationGuideScreen(firstLaunch: Boolean, controller: AppController) {
                         title = "外観と操作を調整する",
                         points = listOf(
                             "「すべて」画面から、テーマと設定を開けます。",
-                            "色・フォント・アイコン・動き・触覚などを変更できます。",
+                            "色・フォント・アイコン・ボタン配置・動き・触覚などを変更できます。",
                             "このガイドも設定から見返せます。",
                         ),
                     )

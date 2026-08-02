@@ -6,6 +6,17 @@ import kotlin.test.assertEquals
 class AppSettingsTest {
     @Test
     fun addButtonDefaultsToLeft() {
-        assertEquals(AddButtonPosition.LEFT, AppSettings().addButtonPosition)
+        val settings = AppSettings()
+
+        assertEquals(AddButtonPosition.LEFT, settings.addButtonPosition)
+        assertEquals(8, settings.addButtonBottomOffsetDp)
+        assertEquals(
+            listOf(MainNavigationButton.TODOS, MainNavigationButton.MEMOS, MainNavigationButton.ALL),
+            settings.navigationButtonOrder,
+        )
+        assertEquals(
+            listOf(TopActionButton.THEMES, TopActionButton.SETTINGS),
+            settings.topActionButtonOrder,
+        )
     }
 }

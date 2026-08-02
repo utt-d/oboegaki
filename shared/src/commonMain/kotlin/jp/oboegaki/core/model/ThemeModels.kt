@@ -9,7 +9,13 @@ enum class AppearanceMode { SYSTEM, LIGHT, DARK }
 enum class MotionStrength { NONE, GENTLE, STANDARD, STRONG }
 
 @Serializable
-enum class AddButtonPosition { LEFT, RIGHT }
+enum class AddButtonPosition { LEFT, CENTER, RIGHT }
+
+@Serializable
+enum class MainNavigationButton { TODOS, MEMOS, ALL }
+
+@Serializable
+enum class TopActionButton { THEMES, SETTINGS }
 
 @Serializable
 data class ThemeColors(
@@ -89,6 +95,16 @@ data class AppSettings(
     val undoSeconds: Int = 5,
     val addWithEnter: Boolean = false,
     val addButtonPosition: AddButtonPosition = AddButtonPosition.LEFT,
+    val addButtonBottomOffsetDp: Int = 8,
+    val navigationButtonOrder: List<MainNavigationButton> = listOf(
+        MainNavigationButton.TODOS,
+        MainNavigationButton.MEMOS,
+        MainNavigationButton.ALL,
+    ),
+    val topActionButtonOrder: List<TopActionButton> = listOf(
+        TopActionButton.THEMES,
+        TopActionButton.SETTINGS,
+    ),
     val tabSwipeEnabled: Boolean = true,
     val calendarIntegrationEnabled: Boolean = true,
     val reducedMotion: Boolean = false,

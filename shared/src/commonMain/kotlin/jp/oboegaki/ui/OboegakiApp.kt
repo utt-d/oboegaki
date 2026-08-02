@@ -52,6 +52,8 @@ import jp.oboegaki.core.data.ItemRepository
 import jp.oboegaki.core.model.AddButtonPosition
 import jp.oboegaki.core.model.AllSections
 import jp.oboegaki.core.model.AppSettings
+import jp.oboegaki.core.model.MainNavigationButton
+import jp.oboegaki.core.model.TopActionButton
 import jp.oboegaki.platform.CalendarExporter
 import jp.oboegaki.platform.NoOpCalendarExporter
 import kotlinx.coroutines.Job
@@ -174,8 +176,19 @@ fun OboegakiApp(
                         elevation = 0.dp,
                         actions = {
                             if (tab == MainTab.ALL) {
-                                TextButton(onClick = controller::openThemes) { Text("${icons.theme} テーマ") }
-                                TextButton(onClick = controller::openSettings) { Text("${icons.settings} 設定") }
+                                normalizedButtonOrder(
+                                    settings.topActionButtonOrder,
+                                    TopActionButton.values().toList(),
+                                ).forEach { button ->
+                                    when (button) {
+                                        TopActionButton.THEMES -> TextButton(onClick = controller::openThemes) {
+                                            Text("${icons.theme} テーマ")
+                                        }
+                                        TopActionButton.SETTINGS -> TextButton(onClick = controller::openSettings) {
+                                            Text("${icons.settings} 設定")
+                                        }
+                                    }
+                                }
                             }
                         },
                     )
@@ -188,24 +201,37 @@ fun OboegakiApp(
                             end = if (settings.addButtonPosition == AddButtonPosition.RIGHT) 56.dp else 0.dp,
                         ),
                     ) {
-                        BottomNavItem("やること", icons.todo, tab == MainTab.TODOS) { animateToTab(MainTab.TODOS) }
-                        BottomNavItem("メモ", icons.memo, tab == MainTab.MEMOS) { animateToTab(MainTab.MEMOS) }
-                        BottomNavItem("すべて", icons.all, tab == MainTab.ALL) { animateToTab(MainTab.ALL) }
+                        normalizedButtonOrder(
+                            settings.navigationButtonOrder,
+                            MainNavigationButton.values().toList(),
+                        ).forEach { button ->
+                            when (button) {
+                                MainNavigationButton.TODOS -> BottomNavItem(
+                                    "やること", icons.todo, tab == MainTab.TODOS,
+                                ) { animateToTab(MainTab.TODOS) }
+                                MainNavigationButton.MEMOS -> BottomNavItem(
+                                    "メモ", icons.memo, tab == MainTab.MEMOS,
+                                ) { animateToTab(MainTab.MEMOS) }
+                                MainNavigationButton.ALL -> BottomNavItem(
+                                    "すべて", icons.all, tab == MainTab.ALL,
+                                ) { animateToTab(MainTab.ALL) }
+                            }
+                        }
                     }
                 },
                 floatingActionButton = {
                     FloatingActionButton(
                         onClick = controller::openAdd,
-                        modifier = Modifier.padding(bottom = 8.dp),
+                        modifier = Modifier.padding(bottom = settings.addButtonBottomOffsetDp.coerceIn(0, 160).dp),
                         shape = CircleShape,
                     ) {
                         Text(icons.add, style = MaterialTheme.typography.h5)
                     }
                 },
-                floatingActionButtonPosition = if (settings.addButtonPosition == AddButtonPosition.LEFT) {
-                    FabPosition.Start
-                } else {
-                    FabPosition.End
+                floatingActionButtonPosition = when (settings.addButtonPosition) {
+                    AddButtonPosition.LEFT -> FabPosition.Start
+                    AddButtonPosition.CENTER -> FabPosition.Center
+                    AddButtonPosition.RIGHT -> FabPosition.End
                 },
                 isFloatingActionButtonDocked = false,
             ) { padding ->
@@ -228,6 +254,10 @@ fun OboegakiApp(
                                 tabOffset = distance.coerceIn(minimum, maximum)
                             },
                             onEnd = ::settleTabSwipe,
+                            onCancel = {
+                                tabTransitionJob?.cancel()
+                                tabOffset = 0f
+                            },
                         )
                 ) {
                     if (tabViewportWidth == 0) {
@@ -261,7 +291,11 @@ fun OboegakiApp(
                                 .padding(
                                     start = if (settings.addButtonPosition == AddButtonPosition.LEFT) 96.dp else 12.dp,
                                     end = if (settings.addButtonPosition == AddButtonPosition.RIGHT) 96.dp else 12.dp,
-                                    bottom = 12.dp,
+                                    bottom = if (settings.addButtonPosition == AddButtonPosition.CENTER) {
+                                        (104 + settings.addButtonBottomOffsetDp.coerceIn(0, 160)).dp
+                                    } else {
+                                        12.dp
+                                    },
                                 ),
                         )
                     }
@@ -292,6 +326,7 @@ private fun TabScreen(
             todoIndex,
             settings.hapticsEnabled,
             settings.addButtonPosition,
+            settings.addButtonBottomOffsetDp,
             controller,
         )
         MainTab.MEMOS -> MemoScreen(
@@ -299,9 +334,15 @@ private fun TabScreen(
             memoIndex,
             settings.hapticsEnabled,
             settings.addButtonPosition,
+            settings.addButtonBottomOffsetDp,
             controller,
         )
-        MainTab.ALL -> AllItemsScreen(sections, settings.addButtonPosition, controller)
+        MainTab.ALL -> AllItemsScreen(
+            sections,
+            settings.addButtonPosition,
+            settings.addButtonBottomOffsetDp,
+            controller,
+        )
     }
 }
 
@@ -316,10 +357,12 @@ private fun Modifier.trackHorizontalTabSwipe(
     onStart: () -> Unit,
     onDrag: (distance: Float) -> Unit,
     onEnd: (distance: Float) -> Unit,
+    onCancel: () -> Unit,
 ): Modifier = if (!enabled) {
     this
 } else {
     pointerInput(enabled, allowChildConsumption) {
+        val gestureSlop = viewConfiguration.touchSlop
         awaitEachGesture {
             val down = awaitFirstDown(
                 requireUnconsumed = false,
@@ -333,13 +376,23 @@ private fun Modifier.trackHorizontalTabSwipe(
 
             while (true) {
                 val event = awaitPointerEvent(PointerEventPass.Final)
-                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                val change = event.changes.firstOrNull { it.id == down.id }
+                if (change == null) {
+                    if (tracking) onCancel()
+                    break
+                }
                 val delta = change.position - change.previousPosition
                 horizontalDistance += delta.x
                 verticalDistance += delta.y
                 consumedByChild = consumedByChild || change.isConsumed
 
-                if (!tracking && !rejected && (abs(horizontalDistance) > 12f || abs(verticalDistance) > 12f)) {
+                if (tracking && !allowChildConsumption && change.isConsumed) {
+                    tracking = false
+                    rejected = true
+                    onCancel()
+                } else if (!tracking && !rejected &&
+                    (abs(horizontalDistance) > gestureSlop || abs(verticalDistance) > gestureSlop)
+                ) {
                     val horizontalIntent = abs(horizontalDistance) > abs(verticalDistance) * 1.25f
                     val verticalIntent = abs(verticalDistance) > abs(horizontalDistance)
                     when {
@@ -362,6 +415,9 @@ private fun Modifier.trackHorizontalTabSwipe(
         }
     }
 }
+
+private fun <T> normalizedButtonOrder(value: List<T>, defaults: List<T>): List<T> =
+    value.filter { it in defaults }.distinct() + defaults.filterNot { it in value }
 
 @Composable
 private fun androidx.compose.foundation.layout.RowScope.BottomNavItem(
