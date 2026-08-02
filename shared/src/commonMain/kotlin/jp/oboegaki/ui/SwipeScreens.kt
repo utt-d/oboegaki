@@ -51,6 +51,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
+import jp.oboegaki.core.model.AddButtonPosition
 import jp.oboegaki.core.model.AppItem
 import jp.oboegaki.core.model.ItemKind
 import kotlinx.coroutines.launch
@@ -69,6 +70,7 @@ fun TodoScreen(
     items: List<AppItem>,
     focusedIndex: Int,
     hapticsEnabled: Boolean,
+    addButtonPosition: AddButtonPosition,
     controller: AppController,
 ) {
     val icons = LocalAppTheme.current.icons
@@ -86,6 +88,7 @@ fun TodoScreen(
         onDown = controller::previousTodo,
         onEdit = { controller.openEdit(it.id) },
         hapticsEnabled = hapticsEnabled,
+        addButtonPosition = addButtonPosition,
     )
 }
 
@@ -94,6 +97,7 @@ fun MemoScreen(
     items: List<AppItem>,
     focusedIndex: Int,
     hapticsEnabled: Boolean,
+    addButtonPosition: AddButtonPosition,
     controller: AppController,
 ) {
     val icons = LocalAppTheme.current.icons
@@ -111,6 +115,7 @@ fun MemoScreen(
         onDown = controller::previousMemo,
         onEdit = { controller.openEdit(it.id) },
         hapticsEnabled = hapticsEnabled,
+        addButtonPosition = addButtonPosition,
     )
 }
 
@@ -129,6 +134,7 @@ private fun SwipeDeck(
     onDown: () -> Unit,
     onEdit: (AppItem) -> Unit,
     hapticsEnabled: Boolean,
+    addButtonPosition: AddButtonPosition,
 ) {
     if (items.isEmpty()) {
         EmptyDeck(kind)
@@ -393,7 +399,13 @@ private fun SwipeDeck(
             Spacer(Modifier.height(8.dp))
             OutlinedButton(
                 onClick = { onEdit(item) },
-                modifier = Modifier.fillMaxWidth().padding(end = 88.dp).height(48.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(
+                        start = if (addButtonPosition == AddButtonPosition.LEFT) 88.dp else 0.dp,
+                        end = if (addButtonPosition == AddButtonPosition.RIGHT) 88.dp else 0.dp,
+                    )
+                    .height(48.dp),
             ) { Text("${theme.icons.edit} 編集") }
         }
     }

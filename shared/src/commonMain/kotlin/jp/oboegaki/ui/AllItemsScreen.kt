@@ -38,12 +38,17 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import jp.oboegaki.core.model.AddButtonPosition
 import jp.oboegaki.core.model.AllSections
 import jp.oboegaki.core.model.AppItem
 import jp.oboegaki.core.model.ItemKind
 
 @Composable
-fun AllItemsScreen(sections: AllSections, controller: AppController) {
+fun AllItemsScreen(
+    sections: AllSections,
+    addButtonPosition: AddButtonPosition,
+    controller: AppController,
+) {
     val expanded = remember { mutableStateMapOf(
         "unsorted" to true, "todos" to true, "memos" to true, "completed" to true, "archived" to true,
     ) }
@@ -58,8 +63,17 @@ fun AllItemsScreen(sections: AllSections, controller: AppController) {
         section("完了したこと", "completed", sections.completed, expanded, controller, reorderable = false, restoreLabel = "やることへ戻す")
         section("しまったメモ", "archived", sections.archived, expanded, controller, reorderable = false, restoreLabel = "メモへ戻す")
         item {
-            Spacer(Modifier.height(10.dp))
-            OutlinedButton(onClick = controller::openDataTools, Modifier.fillMaxWidth().height(48.dp)) {
+            Spacer(Modifier.height(88.dp))
+            OutlinedButton(
+                onClick = controller::openDataTools,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(
+                        start = if (addButtonPosition == AddButtonPosition.LEFT) 82.dp else 0.dp,
+                        end = if (addButtonPosition == AddButtonPosition.RIGHT) 82.dp else 0.dp,
+                    )
+                    .height(48.dp),
+            ) {
                 Text("データのバックアップと読み込み")
             }
         }

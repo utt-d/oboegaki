@@ -1,16 +1,16 @@
 package jp.oboegaki.ui
 
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.shape.CircleShape
@@ -28,22 +28,34 @@ import androidx.compose.material.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.layout.onSizeChanged
 import jp.oboegaki.core.data.BuiltInThemes
 import jp.oboegaki.core.data.ItemRepository
 import jp.oboegaki.core.model.AddButtonPosition
+import jp.oboegaki.core.model.AllSections
+import jp.oboegaki.core.model.AppSettings
 import jp.oboegaki.platform.CalendarExporter
 import jp.oboegaki.platform.NoOpCalendarExporter
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -72,10 +84,69 @@ fun OboegakiApp(
         (220 * theme.animationScale).roundToInt().coerceAtLeast(1)
     }
     val hapticFeedback = LocalHapticFeedback.current
+    var tabOffset by remember { mutableFloatStateOf(0f) }
+    var tabViewportWidth by remember { mutableIntStateOf(0) }
+    var tabTransitionJob by remember { mutableStateOf<Job?>(null) }
 
     fun performHapticFeedback() {
         if (settings.hapticsEnabled) {
             hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+        }
+    }
+
+    fun transitionDuration(distancePx: Float): Int {
+        if (settings.reducedMotion || tabViewportWidth <= 0) return 1
+        val pages = (distancePx / tabViewportWidth).coerceAtLeast(.05f)
+        return (tabTransitionDuration * pages).roundToInt().coerceAtLeast(1)
+    }
+
+    fun animateToTab(target: MainTab) {
+        if (target == tab) return
+        if (tabViewportWidth <= 0) {
+            controller.selectTab(target)
+            return
+        }
+        val source = tab
+        tabTransitionJob?.cancel()
+        tabTransitionJob = scope.launch {
+            val targetOffset = -(target.ordinal - source.ordinal) * tabViewportWidth.toFloat()
+            val startOffset = tabOffset
+            val distance = abs(targetOffset - startOffset)
+            animate(
+                initialValue = startOffset,
+                targetValue = targetOffset,
+                animationSpec = tween(transitionDuration(distance), easing = LinearEasing),
+            ) { value, _ -> tabOffset = value }
+            controller.selectTab(target)
+            tabOffset = 0f
+            performHapticFeedback()
+        }
+    }
+
+    fun settleTabSwipe(distance: Float) {
+        val source = tab
+        val direction = if (distance < 0f) 1 else -1
+        val candidateOrdinal = source.ordinal + direction
+        val target = if (abs(distance) >= tabSwipeThreshold && candidateOrdinal in MainTab.values().indices) {
+            MainTab.values()[candidateOrdinal]
+        } else {
+            source
+        }
+        tabTransitionJob?.cancel()
+        tabTransitionJob = scope.launch {
+            val targetOffset = if (target == source) 0f else -direction * tabViewportWidth.toFloat()
+            val startOffset = tabOffset
+            val remaining = abs(targetOffset - startOffset)
+            animate(
+                initialValue = startOffset,
+                targetValue = targetOffset,
+                animationSpec = tween(transitionDuration(remaining), easing = LinearEasing),
+            ) { value, _ -> tabOffset = value }
+            if (target != source) {
+                controller.selectTab(target)
+                performHapticFeedback()
+            }
+            tabOffset = 0f
         }
     }
 
@@ -110,14 +181,24 @@ fun OboegakiApp(
                     )
                 },
                 bottomBar = {
-                    BottomAppBar(backgroundColor = MaterialTheme.colors.surface) {
-                        BottomNavItem("やること", icons.todo, tab == MainTab.TODOS) { controller.selectTab(MainTab.TODOS) }
-                        BottomNavItem("メモ", icons.memo, tab == MainTab.MEMOS) { controller.selectTab(MainTab.MEMOS) }
-                        BottomNavItem("すべて", icons.all, tab == MainTab.ALL) { controller.selectTab(MainTab.ALL) }
+                    BottomAppBar(
+                        backgroundColor = MaterialTheme.colors.surface,
+                        contentPadding = PaddingValues(
+                            start = if (settings.addButtonPosition == AddButtonPosition.LEFT) 56.dp else 0.dp,
+                            end = if (settings.addButtonPosition == AddButtonPosition.RIGHT) 56.dp else 0.dp,
+                        ),
+                    ) {
+                        BottomNavItem("やること", icons.todo, tab == MainTab.TODOS) { animateToTab(MainTab.TODOS) }
+                        BottomNavItem("メモ", icons.memo, tab == MainTab.MEMOS) { animateToTab(MainTab.MEMOS) }
+                        BottomNavItem("すべて", icons.all, tab == MainTab.ALL) { animateToTab(MainTab.ALL) }
                     }
                 },
                 floatingActionButton = {
-                    FloatingActionButton(onClick = controller::openAdd, shape = CircleShape) {
+                    FloatingActionButton(
+                        onClick = controller::openAdd,
+                        modifier = Modifier.padding(bottom = 8.dp),
+                        shape = CircleShape,
+                    ) {
                         Text(icons.add, style = MaterialTheme.typography.h5)
                     }
                 },
@@ -132,61 +213,56 @@ fun OboegakiApp(
                     Modifier
                         .fillMaxSize()
                         .padding(padding)
-                        .detectHorizontalTabSwipe(
+                        .clipToBounds()
+                        .onSizeChanged { tabViewportWidth = it.width }
+                        .trackHorizontalTabSwipe(
                             enabled = settings.tabSwipeEnabled,
-                            thresholdPx = tabSwipeThreshold,
                             allowChildConsumption = tab == MainTab.ALL,
-                        ) { forward ->
-                            if (controller.selectAdjacentTab(forward)) {
-                                performHapticFeedback()
-                            }
-                        },
+                            onStart = {
+                                tabTransitionJob?.cancel()
+                                tabOffset = 0f
+                            },
+                            onDrag = { distance ->
+                                val minimum = if (tab.ordinal < MainTab.ALL.ordinal) -tabViewportWidth.toFloat() else 0f
+                                val maximum = if (tab.ordinal > MainTab.TODOS.ordinal) tabViewportWidth.toFloat() else 0f
+                                tabOffset = distance.coerceIn(minimum, maximum)
+                            },
+                            onEnd = ::settleTabSwipe,
+                        )
                 ) {
-                    AnimatedContent(
-                        targetState = tab,
-                        transitionSpec = {
-                            val enterFromRight = targetState.ordinal > initialState.ordinal
-                            if (enterFromRight) {
-                                slideInHorizontally(
-                                    animationSpec = tween(tabTransitionDuration, easing = LinearEasing),
-                                    initialOffsetX = { it },
-                                ) togetherWith slideOutHorizontally(
-                                    animationSpec = tween(tabTransitionDuration, easing = LinearEasing),
-                                    targetOffsetX = { -it },
-                                )
-                            } else {
-                                slideInHorizontally(
-                                    animationSpec = tween(tabTransitionDuration, easing = LinearEasing),
-                                    initialOffsetX = { -it },
-                                ) togetherWith slideOutHorizontally(
-                                    animationSpec = tween(tabTransitionDuration, easing = LinearEasing),
-                                    targetOffsetX = { it },
-                                )
+                    if (tabViewportWidth == 0) {
+                        TabScreen(tab, sections, todoIndex, memoIndex, settings, controller)
+                    } else {
+                        MainTab.values().forEach { pageTab ->
+                            key(pageTab) {
+                                val pageBaseOffset = (pageTab.ordinal - tab.ordinal) * tabViewportWidth
+                                Box(
+                                    Modifier
+                                        .fillMaxSize()
+                                        .offset {
+                                            IntOffset(
+                                                x = pageBaseOffset + tabOffset.roundToInt(),
+                                                y = 0,
+                                            )
+                                        },
+                                ) {
+                                    TabScreen(pageTab, sections, todoIndex, memoIndex, settings, controller)
+                                }
                             }
-                        },
-                        label = "main-tab-transition",
-                    ) { targetTab ->
-                        when (targetTab) {
-                            MainTab.TODOS -> TodoScreen(
-                                sections.todos,
-                                todoIndex,
-                                settings.hapticsEnabled,
-                                controller,
-                            )
-                            MainTab.MEMOS -> MemoScreen(
-                                sections.memos,
-                                memoIndex,
-                                settings.hapticsEnabled,
-                                controller,
-                            )
-                            MainTab.ALL -> AllItemsScreen(sections, controller)
                         }
                     }
                     undo?.let {
                         UndoBar(
                             it.message,
                             controller::undo,
-                            Modifier.align(Alignment.BottomCenter).padding(end = 172.dp),
+                            Modifier
+                                .align(Alignment.BottomCenter)
+                                .fillMaxWidth()
+                                .padding(
+                                    start = if (settings.addButtonPosition == AddButtonPosition.LEFT) 96.dp else 12.dp,
+                                    end = if (settings.addButtonPosition == AddButtonPosition.RIGHT) 96.dp else 12.dp,
+                                    bottom = 12.dp,
+                                ),
                         )
                     }
                     message?.let {
@@ -201,20 +277,49 @@ fun OboegakiApp(
     }
 }
 
+@Composable
+private fun TabScreen(
+    tab: MainTab,
+    sections: AllSections,
+    todoIndex: Int,
+    memoIndex: Int,
+    settings: AppSettings,
+    controller: AppController,
+) {
+    when (tab) {
+        MainTab.TODOS -> TodoScreen(
+            sections.todos,
+            todoIndex,
+            settings.hapticsEnabled,
+            settings.addButtonPosition,
+            controller,
+        )
+        MainTab.MEMOS -> MemoScreen(
+            sections.memos,
+            memoIndex,
+            settings.hapticsEnabled,
+            settings.addButtonPosition,
+            controller,
+        )
+        MainTab.ALL -> AllItemsScreen(sections, settings.addButtonPosition, controller)
+    }
+}
+
 /**
  * Detects horizontal tab swipes without stealing the card gestures on the
  * やること and メモ screens. The すべて screen owns a LazyColumn, so its child
  * consumption is deliberately allowed after horizontal intent is confirmed.
  */
-private fun Modifier.detectHorizontalTabSwipe(
+private fun Modifier.trackHorizontalTabSwipe(
     enabled: Boolean,
-    thresholdPx: Float,
     allowChildConsumption: Boolean,
-    onSwipe: (forward: Boolean) -> Unit,
+    onStart: () -> Unit,
+    onDrag: (distance: Float) -> Unit,
+    onEnd: (distance: Float) -> Unit,
 ): Modifier = if (!enabled) {
     this
 } else {
-    pointerInput(enabled, thresholdPx, allowChildConsumption) {
+    pointerInput(enabled, allowChildConsumption) {
         awaitEachGesture {
             val down = awaitFirstDown(
                 requireUnconsumed = false,
@@ -223,6 +328,8 @@ private fun Modifier.detectHorizontalTabSwipe(
             var horizontalDistance = 0f
             var verticalDistance = 0f
             var consumedByChild = down.isConsumed
+            var tracking = false
+            var rejected = false
 
             while (true) {
                 val event = awaitPointerEvent(PointerEventPass.Final)
@@ -232,12 +339,23 @@ private fun Modifier.detectHorizontalTabSwipe(
                 verticalDistance += delta.y
                 consumedByChild = consumedByChild || change.isConsumed
 
-                if (!change.pressed) {
-                    val horizontalEnough = abs(horizontalDistance) >= thresholdPx
+                if (!tracking && !rejected && (abs(horizontalDistance) > 12f || abs(verticalDistance) > 12f)) {
                     val horizontalIntent = abs(horizontalDistance) > abs(verticalDistance) * 1.25f
-                    if ((allowChildConsumption || !consumedByChild) && horizontalEnough && horizontalIntent) {
-                        onSwipe(horizontalDistance < 0f)
+                    val verticalIntent = abs(verticalDistance) > abs(horizontalDistance)
+                    when {
+                        horizontalIntent && (allowChildConsumption || !consumedByChild) -> {
+                            tracking = true
+                            onStart()
+                            onDrag(horizontalDistance)
+                        }
+                        horizontalIntent || verticalIntent -> rejected = true
                     }
+                } else if (tracking && change.pressed) {
+                    onDrag(horizontalDistance)
+                }
+
+                if (!change.pressed) {
+                    if (tracking) onEnd(horizontalDistance)
                     break
                 }
             }
