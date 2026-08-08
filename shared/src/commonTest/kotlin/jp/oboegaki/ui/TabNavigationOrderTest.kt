@@ -32,4 +32,36 @@ class TabNavigationOrderTest {
             ),
         )
     }
+
+    @Test
+    fun configuredOrderResolvesBothAdjacentSwipeDirections() {
+        val order = navigationTabs(
+            listOf(
+                MainNavigationButton.MEMOS,
+                MainNavigationButton.TODOS,
+                MainNavigationButton.ALL,
+            ),
+        )
+
+        assertEquals(MainTab.TODOS, adjacentNavigationTab(MainTab.MEMOS, 1, order))
+        assertEquals(MainTab.MEMOS, adjacentNavigationTab(MainTab.TODOS, -1, order))
+        assertEquals(MainTab.ALL, adjacentNavigationTab(MainTab.TODOS, 1, order))
+        assertEquals(MainTab.TODOS, adjacentNavigationTab(MainTab.ALL, -1, order))
+    }
+
+    @Test
+    fun reversedConfiguredOrderPreservesBothAdjacentSwipeDirections() {
+        val order = navigationTabs(
+            listOf(
+                MainNavigationButton.ALL,
+                MainNavigationButton.TODOS,
+                MainNavigationButton.MEMOS,
+            ),
+        )
+
+        assertEquals(MainTab.TODOS, adjacentNavigationTab(MainTab.ALL, 1, order))
+        assertEquals(MainTab.ALL, adjacentNavigationTab(MainTab.TODOS, -1, order))
+        assertEquals(MainTab.MEMOS, adjacentNavigationTab(MainTab.TODOS, 1, order))
+        assertEquals(MainTab.TODOS, adjacentNavigationTab(MainTab.MEMOS, -1, order))
+    }
 }

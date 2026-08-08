@@ -1008,21 +1008,38 @@ private fun CalendarDatePickerDialog(
                     ) {
                         val offset = if (dragging && settleJob != null) settleOffset.value else horizontalDrag
                         val width = constraints.maxWidth.toFloat().coerceAtLeast(1f)
-                        val direction = if (offset < 0f) 1 else -1
-                        val adjacent = monthAt(direction)
-                        Row(
-                            Modifier.width(maxWidth).offset { IntOffset(
-                                (if (offset < 0f) offset else -width + offset).roundToInt(),
-                                0,
-                            ) },
-                        ) {
-                            if (offset >= 0f && adjacent != null) {
-                                CalendarMonthPage(adjacent.first, adjacent.second, DatePickerPolicy.clampDay(adjacent.first, adjacent.second, selectedDay)) {}
+                        val direction = when {
+                            offset < 0f -> 1
+                            offset > 0f -> -1
+                            else -> 0
+                        }
+                        val adjacent = direction.takeIf { it != 0 }?.let(::monthAt)
+                        val pageWidth = maxWidth
+                        val pageOffset = if (adjacent == null) 0f else offset
+                        Box(Modifier.fillMaxWidth()) {
+                            if (adjacent != null) {
+                                val adjacentOffset = if (pageOffset < 0f) {
+                                    width + pageOffset
+                                } else {
+                                    -width + pageOffset
+                                }
+                                CalendarMonthPage(
+                                    adjacent.first,
+                                    adjacent.second,
+                                    Modifier
+                                        .width(pageWidth)
+                                        .offset { IntOffset(adjacentOffset.roundToInt(), 0) },
+                                    DatePickerPolicy.clampDay(adjacent.first, adjacent.second, selectedDay),
+                                ) {}
                             }
-                            CalendarMonthPage(year, month, selectedDay) { selectedDay = it }
-                            if (offset < 0f && adjacent != null) {
-                                CalendarMonthPage(adjacent.first, adjacent.second, DatePickerPolicy.clampDay(adjacent.first, adjacent.second, selectedDay)) {}
-                            }
+                            CalendarMonthPage(
+                                year,
+                                month,
+                                Modifier
+                                    .width(pageWidth)
+                                    .offset { IntOffset(pageOffset.roundToInt(), 0) },
+                                selectedDay,
+                            ) { selectedDay = it }
                         }
                     }
                 }
@@ -1076,34 +1093,37 @@ private fun YearPicker(selectedYear: Int, onSelect: (Int) -> Unit, onBack: () ->
 private fun CalendarMonthPage(
     year: Int,
     month: Int,
+    modifier: Modifier = Modifier,
     selectedDay: Int,
     onDaySelected: (Int) -> Unit,
 ) {
-    Row(Modifier.fillMaxWidth()) {
-        listOf("月", "火", "水", "木", "金", "土", "日").forEach {
-            Text(it, Modifier.weight(1f), textAlign = TextAlign.Center, style = MaterialTheme.typography.caption)
-        }
-    }
-    Spacer(Modifier.height(4.dp))
-    val firstOffset = LocalDate(year, month, 1).dayOfWeek.ordinal
-    val dayCount = DatePickerPolicy.daysInMonth(year, month)
-    repeat(6) { week ->
+    Column(modifier) {
         Row(Modifier.fillMaxWidth()) {
-            repeat(7) { weekday ->
-                val day = week * 7 + weekday - firstOffset + 1
-                if (day in 1..dayCount) {
-                    val modifier = Modifier.weight(1f).height(42.dp)
-                    if (day == selectedDay) {
-                        Button(onClick = { onDaySelected(day) }, modifier = modifier, contentPadding = PaddingValues(0.dp)) {
-                            Text(day.toString())
+            listOf("月", "火", "水", "木", "金", "土", "日").forEach {
+                Text(it, Modifier.weight(1f), textAlign = TextAlign.Center, style = MaterialTheme.typography.caption)
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        val firstOffset = LocalDate(year, month, 1).dayOfWeek.ordinal
+        val dayCount = DatePickerPolicy.daysInMonth(year, month)
+        repeat(6) { week ->
+            Row(Modifier.fillMaxWidth()) {
+                repeat(7) { weekday ->
+                    val day = week * 7 + weekday - firstOffset + 1
+                    if (day in 1..dayCount) {
+                        val modifier = Modifier.weight(1f).height(42.dp)
+                        if (day == selectedDay) {
+                            Button(onClick = { onDaySelected(day) }, modifier = modifier, contentPadding = PaddingValues(0.dp)) {
+                                Text(day.toString())
+                            }
+                        } else {
+                            TextButton(onClick = { onDaySelected(day) }, modifier = modifier, contentPadding = PaddingValues(0.dp)) {
+                                Text(day.toString())
+                            }
                         }
                     } else {
-                        TextButton(onClick = { onDaySelected(day) }, modifier = modifier, contentPadding = PaddingValues(0.dp)) {
-                            Text(day.toString())
-                        }
+                        Spacer(Modifier.weight(1f).height(42.dp))
                     }
-                } else {
-                    Spacer(Modifier.weight(1f).height(42.dp))
                 }
             }
         }

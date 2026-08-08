@@ -35,6 +35,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -86,6 +87,8 @@ fun OboegakiApp(
     val theme = themes.firstOrNull { it.id == settings.selectedThemeId } ?: BuiltInThemes.standard
     val icons = theme.icons
     val tabOrder = navigationTabs(settings.navigationButtonOrder)
+    val latestTabState = rememberUpdatedState(tab)
+    val latestTabOrderState = rememberUpdatedState(tabOrder)
     val tabSwipeThreshold = with(LocalDensity.current) { 56.dp.toPx() }
     val tabTransitionDuration = if (settings.reducedMotion) {
         1
@@ -96,6 +99,20 @@ fun OboegakiApp(
     var tabOffset by remember { mutableFloatStateOf(0f) }
     var tabViewportWidth by remember { mutableIntStateOf(0) }
     var tabTransitionJob by remember { mutableStateOf<Job?>(null) }
+    var tabTransitionGeneration by remember { mutableIntStateOf(0) }
+
+    fun cancelTabTransition() {
+        tabTransitionGeneration += 1
+        tabTransitionJob?.cancel()
+        tabTransitionJob = null
+    }
+
+    LaunchedEffect(tab, tabOrder) {
+        if (tabTransitionJob != null) {
+            cancelTabTransition()
+            tabOffset = 0f
+        }
+    }
 
     PlatformBackHandler(enabled = overlay != null, onBack = controller::closeOverlay)
 
@@ -120,46 +137,71 @@ fun OboegakiApp(
         val source = tab
         val sourceIndex = tabOrder.indexOf(source)
         val targetIndex = tabOrder.indexOf(target)
-        tabTransitionJob?.cancel()
+        val sourceOrder = tabOrder
+        cancelTabTransition()
+        val generation = tabTransitionGeneration
         tabTransitionJob = scope.launch {
-            val targetOffset = -(targetIndex - sourceIndex) * tabViewportWidth.toFloat()
-            val startOffset = tabOffset
-            val distance = abs(targetOffset - startOffset)
-            animate(
-                initialValue = startOffset,
-                targetValue = targetOffset,
-                animationSpec = tween(transitionDuration(distance), easing = LinearEasing),
-            ) { value, _ -> tabOffset = value }
-            controller.selectTab(target)
-            tabOffset = 0f
-            performHapticFeedback()
+            try {
+                val targetOffset = -(targetIndex - sourceIndex) * tabViewportWidth.toFloat()
+                val startOffset = tabOffset
+                val distance = abs(targetOffset - startOffset)
+                animate(
+                    initialValue = startOffset,
+                    targetValue = targetOffset,
+                    animationSpec = tween(transitionDuration(distance), easing = LinearEasing),
+                ) { value, _ -> tabOffset = value }
+                if (
+                    generation != tabTransitionGeneration ||
+                    source != latestTabState.value ||
+                    sourceOrder != latestTabOrderState.value
+                ) return@launch
+                controller.selectTab(target)
+                tabOffset = 0f
+                performHapticFeedback()
+            } finally {
+                if (generation == tabTransitionGeneration) {
+                    tabTransitionJob = null
+                }
+            }
         }
     }
 
-    fun settleTabSwipe(distance: Float) {
-        val source = tab
-        val direction = if (distance < 0f) 1 else -1
-        val candidateIndex = tabOrder.indexOf(source) + direction
-        val target = if (abs(distance) >= tabSwipeThreshold && candidateIndex in tabOrder.indices) {
-            tabOrder[candidateIndex]
-        } else {
-            source
-        }
-        tabTransitionJob?.cancel()
-        tabTransitionJob = scope.launch {
-            val targetOffset = if (target == source) 0f else -direction * tabViewportWidth.toFloat()
-            val startOffset = tabOffset
-            val remaining = abs(targetOffset - startOffset)
-            animate(
-                initialValue = startOffset,
-                targetValue = targetOffset,
-                animationSpec = tween(transitionDuration(remaining), easing = LinearEasing),
-            ) { value, _ -> tabOffset = value }
-            if (target != source) {
-                controller.selectTab(target)
-                performHapticFeedback()
-            }
+    fun settleTabSwipe(source: MainTab, sourceOrder: List<MainTab>, distance: Float) {
+        if (source != latestTabState.value || sourceOrder != latestTabOrderState.value) {
             tabOffset = 0f
+            return
+        }
+        val direction = if (distance < 0f) 1 else -1
+        val target = if (abs(distance) >= tabSwipeThreshold) {
+            adjacentNavigationTab(source, direction, sourceOrder) ?: source
+        } else source
+        cancelTabTransition()
+        val generation = tabTransitionGeneration
+        tabTransitionJob = scope.launch {
+            try {
+                val targetOffset = if (target == source) 0f else -direction * tabViewportWidth.toFloat()
+                val startOffset = tabOffset
+                val remaining = abs(targetOffset - startOffset)
+                animate(
+                    initialValue = startOffset,
+                    targetValue = targetOffset,
+                    animationSpec = tween(transitionDuration(remaining), easing = LinearEasing),
+                ) { value, _ -> tabOffset = value }
+                if (
+                    generation != tabTransitionGeneration ||
+                    source != latestTabState.value ||
+                    sourceOrder != latestTabOrderState.value
+                ) return@launch
+                if (target != source) {
+                    controller.selectTab(target)
+                    performHapticFeedback()
+                }
+                tabOffset = 0f
+            } finally {
+                if (generation == tabTransitionGeneration) {
+                    tabTransitionJob = null
+                }
+            }
         }
     }
 
@@ -254,20 +296,27 @@ fun OboegakiApp(
                         .onSizeChanged { tabViewportWidth = it.width }
                         .trackHorizontalTabSwipe(
                             enabled = settings.tabSwipeEnabled,
+                            currentTab = tab,
+                            tabOrder = tabOrder,
                             allowChildConsumption = tab == MainTab.ALL,
-                            onStart = {
-                                tabTransitionJob?.cancel()
+                            onStart = { _, _ ->
+                                cancelTabTransition()
                                 tabOffset = 0f
                             },
-                            onDrag = { distance ->
-                                val currentIndex = tabOrder.indexOf(tab)
-                                val minimum = if (currentIndex < tabOrder.lastIndex) -tabViewportWidth.toFloat() else 0f
-                                val maximum = if (currentIndex > 0) tabViewportWidth.toFloat() else 0f
+                            onDrag = { source, sourceOrder, distance ->
+                                val minimum = if (adjacentNavigationTab(source, 1, sourceOrder) != null) {
+                                    -tabViewportWidth.toFloat()
+                                } else 0f
+                                val maximum = if (adjacentNavigationTab(source, -1, sourceOrder) != null) {
+                                    tabViewportWidth.toFloat()
+                                } else 0f
                                 tabOffset = distance.coerceIn(minimum, maximum)
                             },
-                            onEnd = ::settleTabSwipe,
-                            onCancel = {
-                                tabTransitionJob?.cancel()
+                            onEnd = { source, sourceOrder, distance ->
+                                settleTabSwipe(source, sourceOrder, distance)
+                            },
+                            onCancel = { _, _ ->
+                                cancelTabTransition()
                                 tabOffset = 0f
                             },
                         )
@@ -364,23 +413,36 @@ private fun TabScreen(
  * やること and メモ screens. The すべて screen owns a LazyColumn, so its child
  * consumption is deliberately allowed after horizontal intent is confirmed.
  */
+@Composable
 private fun Modifier.trackHorizontalTabSwipe(
     enabled: Boolean,
+    currentTab: MainTab,
+    tabOrder: List<MainTab>,
     allowChildConsumption: Boolean,
-    onStart: () -> Unit,
-    onDrag: (distance: Float) -> Unit,
-    onEnd: (distance: Float) -> Unit,
-    onCancel: () -> Unit,
+    onStart: (source: MainTab, sourceOrder: List<MainTab>) -> Unit,
+    onDrag: (source: MainTab, sourceOrder: List<MainTab>, distance: Float) -> Unit,
+    onEnd: (source: MainTab, sourceOrder: List<MainTab>, distance: Float) -> Unit,
+    onCancel: (source: MainTab, sourceOrder: List<MainTab>) -> Unit,
 ): Modifier = if (!enabled) {
     this
 } else {
-    pointerInput(enabled, allowChildConsumption) {
+    val currentOnStart by rememberUpdatedState(onStart)
+    val currentOnDrag by rememberUpdatedState(onDrag)
+    val currentOnEnd by rememberUpdatedState(onEnd)
+    val currentOnCancel by rememberUpdatedState(onCancel)
+    pointerInput(enabled, currentTab, tabOrder, allowChildConsumption) {
         val gestureSlop = viewConfiguration.touchSlop
         awaitEachGesture {
             val down = awaitFirstDown(
                 requireUnconsumed = false,
                 pass = PointerEventPass.Final,
             )
+            val gestureSource = currentTab
+            val gestureOrder = tabOrder
+            val gestureOnStart = currentOnStart
+            val gestureOnDrag = currentOnDrag
+            val gestureOnEnd = currentOnEnd
+            val gestureOnCancel = currentOnCancel
             var horizontalDistance = 0f
             var verticalDistance = 0f
             var consumedByChild = down.isConsumed
@@ -391,7 +453,7 @@ private fun Modifier.trackHorizontalTabSwipe(
                 val event = awaitPointerEvent(PointerEventPass.Final)
                 val change = event.changes.firstOrNull { it.id == down.id }
                 if (change == null) {
-                    if (tracking) onCancel()
+                    if (tracking) gestureOnCancel(gestureSource, gestureOrder)
                     break
                 }
                 val delta = change.position - change.previousPosition
@@ -402,7 +464,7 @@ private fun Modifier.trackHorizontalTabSwipe(
                 if (tracking && !allowChildConsumption && change.isConsumed) {
                     tracking = false
                     rejected = true
-                    onCancel()
+                    gestureOnCancel(gestureSource, gestureOrder)
                 } else if (!tracking && !rejected &&
                     (abs(horizontalDistance) > gestureSlop || abs(verticalDistance) > gestureSlop)
                 ) {
@@ -411,17 +473,17 @@ private fun Modifier.trackHorizontalTabSwipe(
                     when {
                         horizontalIntent && (allowChildConsumption || !consumedByChild) -> {
                             tracking = true
-                            onStart()
-                            onDrag(horizontalDistance)
+                            gestureOnStart(gestureSource, gestureOrder)
+                            gestureOnDrag(gestureSource, gestureOrder, horizontalDistance)
                         }
                         horizontalIntent || verticalIntent -> rejected = true
                     }
                 } else if (tracking && change.pressed) {
-                    onDrag(horizontalDistance)
+                    gestureOnDrag(gestureSource, gestureOrder, horizontalDistance)
                 }
 
                 if (!change.pressed) {
-                    if (tracking) onEnd(horizontalDistance)
+                    if (tracking) gestureOnEnd(gestureSource, gestureOrder, horizontalDistance)
                     break
                 }
             }
@@ -440,6 +502,17 @@ internal fun navigationTabs(value: List<MainNavigationButton>): List<MainTab> =
             MainNavigationButton.ALL -> MainTab.ALL
         }
     }
+
+internal fun adjacentNavigationTab(
+    source: MainTab,
+    direction: Int,
+    order: List<MainTab>,
+): MainTab? {
+    if (direction !in -1..1 || direction == 0) return null
+    val sourceIndex = order.indexOf(source)
+    if (sourceIndex < 0) return null
+    return order.getOrNull(sourceIndex + direction)
+}
 
 @Composable
 private fun androidx.compose.foundation.layout.RowScope.BottomNavItem(
