@@ -87,8 +87,20 @@ interface OboegakiDao {
     @Query("DELETE FROM themes WHERE id = :id AND builtIn = 0")
     suspend fun deleteCustomTheme(id: String)
 
-    @Query("SELECT * FROM operations WHERE revertedAtEpochMillis IS NULL AND expiresAtEpochMillis >= :now ORDER BY createdAtEpochMillis DESC LIMIT 1")
+    @Query("SELECT * FROM operations WHERE revertedAtEpochMillis IS NULL AND expiresAtEpochMillis >= :now AND type NOT LIKE 'NOTIFICATION_%' ORDER BY createdAtEpochMillis DESC LIMIT 1")
     suspend fun getUndoableOperation(now: Long): OperationEntity?
+
+    @Query("SELECT * FROM operations WHERE operationId = :id LIMIT 1")
+    suspend fun getOperation(id: String): OperationEntity?
+
+    @Query("SELECT * FROM operations ORDER BY createdAtEpochMillis ASC, operationId ASC")
+    suspend fun getOperations(): List<OperationEntity>
+
+    @Query("SELECT EXISTS(SELECT 1 FROM operations WHERE operationId != :operationId AND (createdAtEpochMillis > :createdAtEpochMillis OR (createdAtEpochMillis = :createdAtEpochMillis AND operationId != :operationId)))")
+    suspend fun hasOperationAfterOrAt(createdAtEpochMillis: Long, operationId: String): Boolean
+
+    @Query("SELECT EXISTS(SELECT 1 FROM operations WHERE operationId != :operationId AND revertedAtEpochMillis IS NULL AND (createdAtEpochMillis > :createdAtEpochMillis OR (createdAtEpochMillis = :createdAtEpochMillis AND operationId != :operationId)))")
+    suspend fun hasUnrevertedOperationAfterOrAt(createdAtEpochMillis: Long, operationId: String): Boolean
 
     @Query("UPDATE operations SET revertedAtEpochMillis = :now WHERE operationId = :id")
     suspend fun markOperationReverted(id: String, now: Long)

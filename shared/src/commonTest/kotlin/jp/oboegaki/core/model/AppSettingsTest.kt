@@ -18,5 +18,7 @@ class AppSettingsTest {
             listOf(TopActionButton.THEMES, TopActionButton.SETTINGS),
             settings.topActionButtonOrder,
         )
+        assertEquals(false, settings.showReminderContentOnLockScreen)
+        assertEquals(true, settings.reminderNotificationActionsEnabled)
     }
 }

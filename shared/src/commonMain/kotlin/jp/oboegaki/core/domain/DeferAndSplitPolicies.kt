@@ -1,9 +1,24 @@
 package jp.oboegaki.core.domain
 
 import jp.oboegaki.core.model.AppItem
+import jp.oboegaki.core.model.AppSettings
 import jp.oboegaki.core.model.ItemKind
 import jp.oboegaki.core.model.ItemLifecycle
 import jp.oboegaki.core.model.TodoDetail
+
+data class DeferConfiguration(
+    val defaultItems: Int,
+    val splitThreshold: Int,
+    val splitSuggestionEnabled: Boolean,
+) {
+    companion object {
+        fun from(settings: AppSettings): DeferConfiguration = DeferConfiguration(
+            defaultItems = settings.deferItems,
+            splitThreshold = settings.splitThreshold,
+            splitSuggestionEnabled = settings.splitSuggestionEnabled,
+        )
+    }
+}
 
 data class DeferDecision(
     val updated: AppItem,
@@ -12,17 +27,32 @@ data class DeferDecision(
 )
 
 object DeferPolicy {
-    fun decide(item: AppItem, currentIndex: Int, itemCount: Int, threshold: Int): DeferDecision {
+    fun decide(
+        item: AppItem,
+        currentIndex: Int,
+        itemCount: Int,
+        configuration: DeferConfiguration,
+    ): DeferDecision {
         val detail = requireNotNull(item.todo)
         val count = detail.deferCount + 1
         val shouldPrompt = !detail.splitPromptDisabled && count >= detail.nextSplitPromptAt
-        val offset = (detail.deferValue ?: 3).coerceAtLeast(1)
+        val offset = (detail.deferValue ?: configuration.defaultItems).coerceAtLeast(1)
         return DeferDecision(
             updated = item.copy(todo = detail.copy(deferCount = count)),
             destinationIndex = (currentIndex + offset).coerceAtMost((itemCount - 1).coerceAtLeast(0)),
-            shouldSuggestSplit = shouldPrompt && threshold in 1..10,
+            shouldSuggestSplit = configuration.splitSuggestionEnabled &&
+                shouldPrompt && configuration.splitThreshold in 1..10,
         )
     }
+
+    @Deprecated("Pass DeferConfiguration so settings are honored")
+    fun decide(item: AppItem, currentIndex: Int, itemCount: Int, threshold: Int): DeferDecision =
+        decide(
+            item,
+            currentIndex,
+            itemCount,
+            DeferConfiguration(threshold, threshold, splitSuggestionEnabled = true),
+        )
 
     fun postponePrompt(item: AppItem, threshold: Int): AppItem {
         val detail = requireNotNull(item.todo)

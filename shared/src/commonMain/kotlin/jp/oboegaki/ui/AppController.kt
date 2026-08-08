@@ -3,6 +3,7 @@ package jp.oboegaki.ui
 import jp.oboegaki.core.data.BuiltInThemes
 import jp.oboegaki.core.data.ItemRepository
 import jp.oboegaki.core.domain.MoveDecision
+import jp.oboegaki.core.domain.DeferConfiguration
 import jp.oboegaki.core.domain.SplitValidation
 import jp.oboegaki.core.domain.ThemeValidation
 import jp.oboegaki.core.model.AllSections
@@ -12,6 +13,7 @@ import jp.oboegaki.core.model.AppSettings
 import jp.oboegaki.core.model.ItemKind
 import jp.oboegaki.core.model.ThemeDefinition
 import jp.oboegaki.core.model.ItemRelation
+import jp.oboegaki.core.model.ItemLifecycle
 import jp.oboegaki.platform.CalendarEventDraft
 import jp.oboegaki.platform.CalendarExportResult
 import jp.oboegaki.platform.CalendarExporter
@@ -21,6 +23,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 enum class MainTab { TODOS, MEMOS, ALL }
@@ -66,6 +69,7 @@ class AppController(
     private var undoJob: Job? = null
     private var messageJob: Job? = null
     private var initialGuideResolved = false
+    private var notificationFocusRequested = false
     private val overlayHistory = OverlayBackStack()
 
     init {
@@ -81,7 +85,7 @@ class AppController(
                 _settings.value = value
                 if (!initialGuideResolved) {
                     initialGuideResolved = true
-                    if (!value.operationGuideSeen && _overlay.value == null) {
+                    if (!value.operationGuideSeen && _overlay.value == null && !notificationFocusRequested) {
                         _overlay.value = AppOverlay.OperationGuide(firstLaunch = true)
                     }
                 }
@@ -92,6 +96,23 @@ class AppController(
     }
 
     fun selectTab(tab: MainTab) { _tab.value = tab }
+
+    fun focusItem(itemId: String) = scope.launch {
+        notificationFocusRequested = true
+        val item = repository.getItem(itemId)
+        val currentSections = repository.observeAllSections().first()
+        dismissOverlays()
+        if (item?.lifecycle == ItemLifecycle.ACTIVE && item.kind == ItemKind.TODO && !item.isGroup) {
+            val index = currentSections.todos.indexOfFirst { it.id == itemId }
+            if (index >= 0) {
+                _tab.value = MainTab.TODOS
+                _todoIndex.value = index
+                return@launch
+            }
+        }
+        _tab.value = MainTab.ALL
+        showMessage("対象のやることはすべて画面で確認できます")
+    }
     fun selectAdjacentTab(forward: Boolean): Boolean {
         val tabs = MainTab.values()
         val candidate = _tab.value.ordinal + if (forward) 1 else -1
@@ -235,9 +256,10 @@ class AppController(
     fun deferCurrent() {
         val item = _sections.value.todos.getOrNull(_todoIndex.value) ?: return
         scope.launch {
-            val decision = repository.defer(item.id, _settings.value.splitThreshold) ?: return@launch
+            val configuration = DeferConfiguration.from(_settings.value)
+            val decision = repository.defer(item.id, configuration) ?: return@launch
             showUndo("後で行うことにしました")
-            if (_settings.value.splitSuggestionEnabled && decision.shouldSuggestSplit) {
+            if (decision.shouldSuggestSplit) {
                 _overlay.value = AppOverlay.Split(item.id)
             }
         }

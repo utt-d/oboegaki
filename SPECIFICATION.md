@@ -32,3 +32,11 @@
 - `AC-REC-04`: 定期グループの完了は一つのトランザクションで、現行ツリーの完了と次回ツリーの生成を行う。
 
 受け入れ条件ID（AC-ADD、AC-GES、AC-ORD、AC-SPL、AC-THM）と詳細値は、添付された正文を参照する。
+
+## Android通知の追加仕様
+
+- 通知は `AlarmManager.RTC_WAKEUP` と `setAndAllowWhileIdle` を標準経路とし、バックグラウンドActivity起動、フルスクリーンインテント、オーバーレイ、バブル、フォアグラウンドサービス、電池最適化除外要求、正確なアラーム権限を使用しない。
+- ロック画面の内容は既定で非公開とし、設定で「ロック画面に内容を表示」を明示的に有効化した時だけタイトルを表示する。Doze等の省電力状態では通知が遅れる場合があることを設定とREADMEに明示する。
+- 通知には「確認する」「完了」「後で行う」を表示し、Actionは明示的・immutableなPendingIntentでitem/action/operationごとに識別する。Actionはアプリプロセス終了後もApplication初期化後に処理する。
+- 「完了」「後で行う」は共通Domain/Repositoryの既存complete/defer規則を再利用し、成功時は対象操作IDを持つUndoトークンを返す。成功通知の「元に戻す」は10秒以内かつ別操作がない場合だけ同じ操作へ適用する。グローバルな最後の操作Undoには結び付けない。
+- BOOT_COMPLETED、MY_PACKAGE_REPLACED、TIME_SET、TIMEZONE_CHANGED後は、Receiverが並べ替えや期限判定を行わず、Repository共通ロジックで有効な未来の通知を再登録する。通知からの状態変更と再登録は端末内で完結し、通常のActivityを勝手に前面表示しない。

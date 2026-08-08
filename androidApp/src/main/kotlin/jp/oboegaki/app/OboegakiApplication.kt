@@ -4,19 +4,45 @@ import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.os.Build
+import jp.oboegaki.core.data.AppDatabase
+import jp.oboegaki.core.data.RoomItemRepository
+import jp.oboegaki.core.data.buildDatabase
+import jp.oboegaki.core.data.databaseBuilder
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 class OboegakiApplication : Application() {
+    lateinit var database: AppDatabase
+        private set
+    lateinit var reminderScheduler: AndroidReminderScheduler
+        private set
+    lateinit var repository: RoomItemRepository
+        private set
+
     override fun onCreate() {
         super.onCreate()
+        database = buildDatabase(databaseBuilder(this))
+        reminderScheduler = AndroidReminderScheduler(this)
+        repository = RoomItemRepository(database, reminderScheduler)
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            runCatching { reminderScheduler.applySettings(repository.getSettings()) }
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(NotificationChannel(
                 REMINDER_CHANNEL,
-                "やることの時刻",
+                getString(R.string.notification_channel_name),
                 NotificationManager.IMPORTANCE_DEFAULT,
             ))
         }
     }
 
-    companion object { const val REMINDER_CHANNEL = "todo_reminders" }
+    companion object {
+        const val REMINDER_CHANNEL = "todo_reminders"
+
+        fun from(context: android.content.Context): OboegakiApplication =
+            context.applicationContext as OboegakiApplication
+    }
 }

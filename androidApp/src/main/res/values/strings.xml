@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">おぼえがき</string>
+    <string name="notification_channel_name">やることの時刻</string>
+    <string name="notification_generic_title">やることの通知です</string>
+    <string name="notification_generic_text">通知の内容は設定により非公開です</string>
+    <string name="notification_reminder_text">予定したやることを確認しましょう</string>
+    <string name="notification_confirm">確認する</string>
+    <string name="notification_complete">完了</string>
+    <string name="notification_defer">後で行う</string>
+    <string name="notification_undo">元に戻す</string>
+    <string name="notification_complete_result">完了しました</string>
+    <string name="notification_defer_result">後で行うことにしました</string>
+    <string name="notification_split_result">何度も後で行っています。アプリで小さく分けられます</string>
+    <string name="notification_restored_result">元に戻しました</string>
+    <string name="notification_updated_text">やることの通知を更新しました</string>
+    <string name="notification_action_disabled">通知の操作は設定で無効です</string>
+    <string name="notification_item_not_found">対象のやることが見つかりません</string>
+    <string name="notification_item_not_active">このやることはすでに処理されています</string>
+    <string name="notification_stale">この通知はすでに処理されています</string>
+    <string name="notification_not_eligible">この項目は通知から操作できません</string>
+    <string name="notification_action_failed">通知を処理できませんでした</string>
+    <string name="notification_undo_failed">元に戻せませんでした</string>
+    <string name="notification_undo_expired">元に戻す期限が過ぎています</string>
+    <string name="notification_undo_reverted">この操作はすでに元に戻されています</string>
+    <string name="notification_undo_later">別の操作後のため元に戻せません</string>
+    <string name="notification_undo_not_found">元に戻す操作が見つかりません</string>
+</resources>

@@ -64,7 +64,8 @@ data class TodoDetail(
     val nextSplitPromptAt: Int = 3,
     val splitPromptDisabled: Boolean = false,
     val deferMethod: DeferMethod = DeferMethod.AFTER_ITEMS,
-    val deferValue: Int? = 3,
+    /** Null inherits the app-wide "何件後に再表示" setting. */
+    val deferValue: Int? = null,
     val pinWithinGroup: Boolean = false,
     val recurrence: RecurrenceRule? = null,
     /** Original local calendar anchors for every date carried by a recurrence. */

@@ -28,6 +28,7 @@ import androidx.compose.material.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -65,6 +66,8 @@ import kotlin.math.roundToInt
 fun OboegakiApp(
     repository: ItemRepository,
     calendarExporter: CalendarExporter = NoOpCalendarExporter,
+    focusItemId: String? = null,
+    focusRequestKey: Long = 0L,
 ) {
     val scope = rememberCoroutineScope()
     val controller = remember(repository, scope, calendarExporter) { AppController(repository, scope, calendarExporter) }
@@ -77,6 +80,9 @@ fun OboegakiApp(
     val memoIndex by controller.memoIndex.collectAsState()
     val undo by controller.undo.collectAsState()
     val message by controller.message.collectAsState()
+    LaunchedEffect(focusItemId, focusRequestKey) {
+        focusItemId?.let(controller::focusItem)
+    }
     val theme = themes.firstOrNull { it.id == settings.selectedThemeId } ?: BuiltInThemes.standard
     val icons = theme.icons
     val tabOrder = navigationTabs(settings.navigationButtonOrder)

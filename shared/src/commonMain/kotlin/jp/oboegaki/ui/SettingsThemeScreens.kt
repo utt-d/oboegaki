@@ -65,6 +65,27 @@ fun SettingsScreen(settings: AppSettings, controller: AppController) {
             item { SectionTitle("操作") }
             item { SettingSwitch("触覚フィードバック", draft.hapticsEnabled) { draft = draft.copy(hapticsEnabled = it) } }
             item { SettingSwitch("Enterで追加", draft.addWithEnter) { draft = draft.copy(addWithEnter = it) } }
+            item { SectionTitle("通知") }
+            item {
+                SettingSwitch("ロック画面に内容を表示", draft.showReminderContentOnLockScreen) {
+                    draft = draft.copy(showReminderContentOnLockScreen = it)
+                }
+                Text(
+                    "初期状態ではロック画面にタイトルを表示しません。端末や省電力機能により通知が遅れる場合があります。",
+                    style = MaterialTheme.typography.caption,
+                    color = parseColor(LocalThemeColors.current.textSecondary),
+                )
+            }
+            item {
+                SettingSwitch("通知から完了・後で行うを使う", draft.reminderNotificationActionsEnabled) {
+                    draft = draft.copy(reminderNotificationActionsEnabled = it)
+                }
+                Text(
+                    "通知からの操作は端末内で処理し、通常の画面を勝手に前面表示しません。",
+                    style = MaterialTheme.typography.caption,
+                    color = parseColor(LocalThemeColors.current.textSecondary),
+                )
+            }
             item { SectionTitle("ボタン配置") }
             item {
                 Text("追加ボタンの横位置", style = MaterialTheme.typography.subtitle1)

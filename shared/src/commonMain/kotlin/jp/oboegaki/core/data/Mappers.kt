@@ -72,7 +72,10 @@ fun TodoDetailEntity.toModel() = TodoDetail(
     nextSplitPromptAt = nextSplitPromptAt,
     splitPromptDisabled = splitPromptDisabled,
     deferMethod = enumValueOf<DeferMethod>(deferMethod),
-    deferValue = deferValue,
+    // Releases before 0.3.0 persisted the implicit default (3) as though it
+    // were an item override. No UI exposed an override, so let the app-wide
+    // setting control existing items too.
+    deferValue = deferValue?.takeUnless { it == LEGACY_IMPLICIT_DEFER_ITEMS },
     pinWithinGroup = pinWithinGroup,
     recurrence = recurrenceUnit?.let { unit ->
         RecurrenceRule(
@@ -94,3 +97,5 @@ fun TodoDetailEntity.toModel() = TodoDetail(
 fun ItemRelationEntity.toModel() = ItemRelation(
     id, fromItemId, toItemId, enumValueOf<RelationType>(type), createdAtEpochMillis,
 )
+
+private const val LEGACY_IMPLICIT_DEFER_ITEMS = 3

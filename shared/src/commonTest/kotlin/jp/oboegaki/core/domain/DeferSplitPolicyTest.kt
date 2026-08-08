@@ -1,6 +1,7 @@
 package jp.oboegaki.core.domain
 
 import jp.oboegaki.core.model.AppItem
+import jp.oboegaki.core.model.AppSettings
 import jp.oboegaki.core.model.ItemKind
 import jp.oboegaki.core.model.TodoDetail
 import kotlin.test.Test
@@ -13,7 +14,7 @@ class DeferSplitPolicyTest {
     @Test
     fun thirdDeferSuggestsSplit() {
         val item = todo(TodoDetail(deferCount = 2, nextSplitPromptAt = 3))
-        val result = DeferPolicy.decide(item, 0, 8, 3)
+        val result = DeferPolicy.decide(item, 0, 8, DeferConfiguration.from(AppSettings()))
         assertEquals(3, result.updated.todo?.deferCount)
         assertTrue(result.shouldSuggestSplit)
         assertEquals(3, result.destinationIndex)
@@ -22,7 +23,22 @@ class DeferSplitPolicyTest {
     @Test
     fun disabledItemDoesNotSuggestSplit() {
         val item = todo(TodoDetail(deferCount = 2, nextSplitPromptAt = 3, splitPromptDisabled = true))
-        assertFalse(DeferPolicy.decide(item, 0, 8, 3).shouldSuggestSplit)
+        assertFalse(DeferPolicy.decide(item, 0, 8, DeferConfiguration.from(AppSettings())).shouldSuggestSplit)
+    }
+
+    @Test
+    fun configurationUsesDefaultItemsAndItemOverride() {
+        val configuration = DeferConfiguration(defaultItems = 5, splitThreshold = 3, splitSuggestionEnabled = true)
+        assertEquals(5, DeferPolicy.decide(todo(TodoDetail()), 0, 10, configuration).destinationIndex)
+        assertEquals(5, DeferPolicy.decide(todo(TodoDetail(deferValue = null)), 0, 10, configuration).destinationIndex)
+        assertEquals(2, DeferPolicy.decide(todo(TodoDetail(deferValue = 2)), 0, 10, configuration).destinationIndex)
+    }
+
+    @Test
+    fun disabledSplitSuggestionIsHonoredByDomain() {
+        val item = todo(TodoDetail(deferCount = 2, nextSplitPromptAt = 3))
+        val configuration = DeferConfiguration(defaultItems = 3, splitThreshold = 3, splitSuggestionEnabled = false)
+        assertFalse(DeferPolicy.decide(item, 0, 8, configuration).shouldSuggestSplit)
     }
 
     @Test
@@ -46,4 +62,3 @@ class DeferSplitPolicyTest {
 
     private companion object { var counter = 0 }
 }
-

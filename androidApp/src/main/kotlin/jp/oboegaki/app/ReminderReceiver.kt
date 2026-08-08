@@ -1,58 +1,81 @@
 package jp.oboegaki.app
 
-import android.app.NotificationManager
-import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
-import androidx.core.app.NotificationCompat
-import java.nio.ByteBuffer
-import java.security.MessageDigest
+import jp.oboegaki.core.domain.ReminderPolicy
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicBoolean
 
 class ReminderReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        val itemId = intent.getStringExtra("item_id") ?: return
-        val title = intent.getStringExtra("title") ?: "やることの時刻です"
-        val openIntent = Intent(context, MainActivity::class.java)
-            .setData(Uri.parse("oboegaki://item/$itemId"))
-            .putExtra("item_id", itemId)
-        val pending = PendingIntent.getActivity(
-            context, 0, openIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-        val notification = NotificationCompat.Builder(context, OboegakiApplication.REMINDER_CHANNEL)
-            .setSmallIcon(android.R.drawable.ic_popup_reminder)
-            .setContentTitle(title)
-            .setContentText("予定したやることを確認しましょう")
-            .setContentIntent(pending)
-            .setAutoCancel(true)
-            .build()
-        context.getSystemService(NotificationManager::class.java).notify(notificationId(context, itemId), notification)
-    }
-
-    private fun notificationId(context: Context, itemId: String): Int {
-        val preferences = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
-        val key = "$ID_PREFIX$itemId"
-        preferences.getInt(key, 0).takeIf { it != 0 }?.let { return it }
-
-        val digest = MessageDigest.getInstance("SHA-256").digest(itemId.encodeToByteArray())
-        var candidate = ByteBuffer.wrap(digest).int and Int.MAX_VALUE
-        if (candidate == 0) candidate = 1
-        val used = preferences.all
-            .filterKeys { it.startsWith(ID_PREFIX) }
-            .values
-            .filterIsInstance<Int>()
-            .toHashSet()
-        while (candidate in used || candidate == 0) {
-            candidate = if (candidate == Int.MAX_VALUE) 1 else candidate + 1
+        val pendingResult = goAsync()
+        val finished = AtomicBoolean(false)
+        fun finishOnce() {
+            if (finished.compareAndSet(false, true)) {
+                runCatching { pendingResult.finish() }
+            }
         }
-        preferences.edit().putInt(key, candidate).apply()
-        return candidate
+
+        try {
+            val app = OboegakiApplication.from(context)
+            val workScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+            try {
+                workScope.launch {
+                    try {
+                        deliver(context, app, intent)
+                    } catch (_: Throwable) {
+                        intent.getStringExtra(NotificationContract.EXTRA_ITEM_ID)?.let { itemId ->
+                            ReminderNotificationSupport.cancelSafely(
+                                context,
+                                NotificationIdentity.notificationId(context, itemId),
+                            )
+                        }
+                    } finally {
+                        finishOnce()
+                        runCatching { workScope.cancel() }
+                    }
+                }
+            } catch (_: Throwable) {
+                runCatching { workScope.cancel() }
+                finishOnce()
+            }
+        } catch (_: Throwable) {
+            finishOnce()
+        }
     }
 
-    private companion object {
-        const val PREFERENCES = "reminder_identity"
-        const val ID_PREFIX = "notification_id:"
+    private suspend fun deliver(
+        context: Context,
+        app: OboegakiApplication,
+        intent: Intent,
+    ) {
+        val itemId = intent.getStringExtra(NotificationContract.EXTRA_ITEM_ID)
+            ?.takeIf(String::isNotEmpty) ?: return
+        if (!intent.hasExtra(NotificationContract.EXTRA_REVISION) ||
+            !intent.hasExtra(NotificationContract.EXTRA_SCHEDULED_AT)
+        ) return
+        val revision = intent.getLongExtra(NotificationContract.EXTRA_REVISION, Long.MIN_VALUE)
+        val scheduledAt = intent.getLongExtra(NotificationContract.EXTRA_SCHEDULED_AT, Long.MIN_VALUE)
+        val item = app.repository.getItem(itemId) ?: return
+        if (!ReminderPolicy.isDeliveryEligible(item, revision, scheduledAt, System.currentTimeMillis())) return
+        val settings = app.repository.getSettings()
+        val notification = ReminderNotificationSupport.createReminderNotification(
+            context = context.applicationContext,
+            itemId = item.id,
+            title = item.title,
+            revision = item.revision,
+            showContent = settings.showReminderContentOnLockScreen,
+            actionsEnabled = settings.reminderNotificationActionsEnabled,
+        )
+        ReminderNotificationSupport.notifySafely(
+            context,
+            NotificationIdentity.notificationId(context, item.id),
+            notification,
+        )
     }
 }

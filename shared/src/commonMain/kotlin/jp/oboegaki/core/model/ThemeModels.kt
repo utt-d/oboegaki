@@ -111,4 +111,6 @@ data class AppSettings(
     val appearanceMode: AppearanceMode = AppearanceMode.SYSTEM,
     val selectedThemeId: String = "standard",
     val operationGuideSeen: Boolean = false,
+    val showReminderContentOnLockScreen: Boolean = false,
+    val reminderNotificationActionsEnabled: Boolean = true,
 )
