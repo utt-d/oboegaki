@@ -15,12 +15,11 @@ sealed interface ReminderResult {
 interface ReminderScheduler {
     suspend fun schedule(reminder: Reminder): ReminderResult
     suspend fun cancel(itemId: String)
-    suspend fun reconcileAll(reminders: List<Reminder>)
+    suspend fun reconcileAll(reminders: List<Reminder>, staleItemIds: Set<String> = emptySet())
 }
 
 object NoOpReminderScheduler : ReminderScheduler {
     override suspend fun schedule(reminder: Reminder) = ReminderResult.Scheduled
     override suspend fun cancel(itemId: String) = Unit
-    override suspend fun reconcileAll(reminders: List<Reminder>) = Unit
+    override suspend fun reconcileAll(reminders: List<Reminder>, staleItemIds: Set<String>) = Unit
 }
-

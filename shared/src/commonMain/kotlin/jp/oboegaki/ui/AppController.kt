@@ -136,13 +136,51 @@ class AppController(
         _overlay.value = null
     }
 
-    fun quickAdd(kind: ItemKind, text: String, onAdded: (AppItem) -> Unit = {}) = scope.launch {
-        val item = repository.quickAdd(kind, text)
+    fun quickAdd(
+        kind: ItemKind,
+        text: String,
+        groupId: String? = null,
+        onAdded: (AppItem) -> Unit = {},
+    ) = scope.launch {
+        val item = repository.quickAdd(kind, text, groupId)
         if (item == null) showMessage("内容を入力してください")
         else {
             onAdded(item)
             showUndo("追加しました")
         }
+    }
+
+    fun addDetailed(
+        kind: ItemKind,
+        title: String,
+        body: String,
+        groupId: String?,
+        detail: jp.oboegaki.core.model.TodoDetail?,
+        requiredBeforeIds: Set<String> = emptySet(),
+        onAdded: (AppItem) -> Unit = {},
+    ) = scope.launch {
+        val item = repository.addDetailed(kind, title, body, groupId, detail, requiredBeforeIds)
+        if (item == null) showMessage("追加できませんでした")
+        else {
+            onAdded(item)
+            showUndo("追加しました")
+        }
+    }
+
+    fun createGroup(
+        kind: ItemKind,
+        title: String,
+        groupId: String? = null,
+        todo: jp.oboegaki.core.model.TodoDetail? = null,
+        requiredBeforeIds: Set<String> = emptySet(),
+    ) = scope.launch {
+        runCatching {
+            requireNotNull(repository.createGroup(kind, title, groupId, todo, requiredBeforeIds)) {
+                "グループを追加できませんでした"
+            }
+        }
+            .onSuccess { closeOverlay(); showUndo("グループを追加しました") }
+            .onFailure { showMessage(it.message ?: "グループを追加できませんでした") }
     }
 
     fun save(item: AppItem, requiredBeforeIds: Set<String>? = null) = scope.launch {
@@ -189,6 +227,11 @@ class AppController(
         scope.launch { repository.complete(item.id); showUndo("完了しました") }
     }
 
+    fun complete(id: String) = scope.launch {
+        repository.complete(id)
+        showUndo("完了しました")
+    }
+
     fun deferCurrent() {
         val item = _sections.value.todos.getOrNull(_todoIndex.value) ?: return
         scope.launch {
@@ -208,6 +251,11 @@ class AppController(
     fun archiveCurrentMemo() {
         val item = _sections.value.memos.getOrNull(_memoIndex.value) ?: return
         scope.launch { repository.archiveMemo(item.id); showUndo("メモをしまいました") }
+    }
+
+    fun archiveMemo(id: String) = scope.launch {
+        repository.archiveMemo(id)
+        showUndo("メモをしまいました")
     }
 
     fun nextTodo() = moveFocus(true, true)
@@ -236,6 +284,13 @@ class AppController(
     fun moveFree(id: String, destinationIndex: Int) = scope.launch {
         repository.moveFree(id, destinationIndex)
         showUndo("順番を変更しました")
+    }
+
+    fun moveWithinGroup(id: String, direction: Int) = scope.launch {
+        when (val result = repository.moveWithinGroup(id, direction)) {
+            is MoveDecision.Allowed -> showUndo("順番を変更しました")
+            is MoveDecision.Rejected -> showMessage(result.message)
+        }
     }
 
     fun split(id: String, titles: List<String>) = scope.launch {
@@ -299,7 +354,7 @@ class AppController(
 
     fun importBackup(value: String) = scope.launch {
         val result = repository.importBackupJson(value)
-        showMessage(result.message)
+        if (result.successful) showUndo(result.message) else showMessage(result.message)
     }
 
     fun undo() = scope.launch {

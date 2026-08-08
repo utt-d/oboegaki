@@ -1,11 +1,12 @@
 package jp.oboegaki.core.data
 
 import androidx.room.Entity
+import androidx.room.ColumnInfo
 import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
-@Entity(tableName = "items", indices = [Index("kind"), Index("lifecycle"), Index("manualRank")])
+@Entity(tableName = "items", indices = [Index("kind"), Index("lifecycle"), Index("manualRank"), Index("groupId")])
 data class ItemEntity(
     @PrimaryKey val id: String,
     val kind: String,
@@ -13,6 +14,8 @@ data class ItemEntity(
     val title: String,
     val body: String,
     val manualRank: Long,
+    @ColumnInfo(defaultValue = "0") val isGroup: Boolean,
+    val groupId: String?,
     val parentId: String?,
     val convertedFromId: String?,
     val createdAtEpochMillis: Long,
@@ -45,6 +48,17 @@ data class TodoDetailEntity(
     val deferMethod: String,
     val deferValue: Int?,
     val pinWithinGroup: Boolean,
+    val recurrenceUnit: String?,
+    val recurrenceInterval: Int?,
+    val recurrenceEndAtEpochMillis: Long?,
+    val recurrenceAnchorMonth: Int?,
+    val recurrenceAnchorDayOfMonth: Int?,
+    val recurrenceScheduledAnchorMonth: Int?,
+    val recurrenceScheduledAnchorDayOfMonth: Int?,
+    val recurrenceAvailableAnchorMonth: Int?,
+    val recurrenceAvailableAnchorDayOfMonth: Int?,
+    val recurrenceDueAnchorMonth: Int?,
+    val recurrenceDueAnchorDayOfMonth: Int?,
 )
 
 @Entity(
@@ -83,4 +97,3 @@ data class SettingEntity(
     @PrimaryKey val key: String,
     val value: String,
 )
-

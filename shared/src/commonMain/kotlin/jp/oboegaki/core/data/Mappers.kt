@@ -6,18 +6,37 @@ import jp.oboegaki.core.model.ItemKind
 import jp.oboegaki.core.model.ItemLifecycle
 import jp.oboegaki.core.model.ItemRelation
 import jp.oboegaki.core.model.Priority
+import jp.oboegaki.core.model.RecurrenceRule
+import jp.oboegaki.core.model.RecurrenceUnit
 import jp.oboegaki.core.model.RelationType
 import jp.oboegaki.core.model.TodoDetail
 
 fun AppItem.toEntity() = ItemEntity(
-    id, kind.name, lifecycle.name, title, body, manualRank, parentId, convertedFromId,
-    createdAtEpochMillis, updatedAtEpochMillis, completedAtEpochMillis, archivedAtEpochMillis, revision,
+    id = id,
+    kind = kind.name,
+    lifecycle = lifecycle.name,
+    title = title,
+    body = body,
+    manualRank = manualRank,
+    isGroup = isGroup,
+    groupId = groupId,
+    parentId = parentId,
+    convertedFromId = convertedFromId,
+    createdAtEpochMillis = createdAtEpochMillis,
+    updatedAtEpochMillis = updatedAtEpochMillis,
+    completedAtEpochMillis = completedAtEpochMillis,
+    archivedAtEpochMillis = archivedAtEpochMillis,
+    revision = revision,
 )
 
 fun TodoDetail.toEntity(itemId: String) = TodoDetailEntity(
     itemId, availableFromEpochMillis, scheduledAtEpochMillis, dueAtEpochMillis, priority.name,
     estimatedMinutes, deferCount, nextSplitPromptAt, splitPromptDisabled, deferMethod.name,
-    deferValue, pinWithinGroup,
+    deferValue, pinWithinGroup, recurrence?.unit?.name, recurrence?.interval,
+    recurrence?.endAtEpochMillis, recurrence?.anchorMonth, recurrence?.anchorDayOfMonth,
+    recurrenceScheduledAnchorMonth, recurrenceScheduledAnchorDayOfMonth,
+    recurrenceAvailableAnchorMonth, recurrenceAvailableAnchorDayOfMonth,
+    recurrenceDueAnchorMonth, recurrenceDueAnchorDayOfMonth,
 )
 
 fun ItemRelation.toEntity() = ItemRelationEntity(
@@ -31,6 +50,8 @@ fun ItemEntity.toModel(detail: TodoDetailEntity?) = AppItem(
     title = title,
     body = body,
     manualRank = manualRank,
+    isGroup = isGroup,
+    groupId = groupId,
     parentId = parentId,
     convertedFromId = convertedFromId,
     createdAtEpochMillis = createdAtEpochMillis,
@@ -42,12 +63,34 @@ fun ItemEntity.toModel(detail: TodoDetailEntity?) = AppItem(
 )
 
 fun TodoDetailEntity.toModel() = TodoDetail(
-    availableFromEpochMillis, scheduledAtEpochMillis, dueAtEpochMillis,
-    enumValueOf<Priority>(priority), estimatedMinutes, deferCount, nextSplitPromptAt,
-    splitPromptDisabled, enumValueOf<DeferMethod>(deferMethod), deferValue, pinWithinGroup,
+    availableFromEpochMillis = availableFromEpochMillis,
+    scheduledAtEpochMillis = scheduledAtEpochMillis,
+    dueAtEpochMillis = dueAtEpochMillis,
+    priority = enumValueOf<Priority>(priority),
+    estimatedMinutes = estimatedMinutes,
+    deferCount = deferCount,
+    nextSplitPromptAt = nextSplitPromptAt,
+    splitPromptDisabled = splitPromptDisabled,
+    deferMethod = enumValueOf<DeferMethod>(deferMethod),
+    deferValue = deferValue,
+    pinWithinGroup = pinWithinGroup,
+    recurrence = recurrenceUnit?.let { unit ->
+        RecurrenceRule(
+            unit = enumValueOf<RecurrenceUnit>(unit),
+            interval = recurrenceInterval ?: 1,
+            endAtEpochMillis = recurrenceEndAtEpochMillis,
+            anchorMonth = recurrenceAnchorMonth,
+            anchorDayOfMonth = recurrenceAnchorDayOfMonth,
+        )
+    },
+    recurrenceScheduledAnchorMonth = recurrenceScheduledAnchorMonth,
+    recurrenceScheduledAnchorDayOfMonth = recurrenceScheduledAnchorDayOfMonth,
+    recurrenceAvailableAnchorMonth = recurrenceAvailableAnchorMonth,
+    recurrenceAvailableAnchorDayOfMonth = recurrenceAvailableAnchorDayOfMonth,
+    recurrenceDueAnchorMonth = recurrenceDueAnchorMonth,
+    recurrenceDueAnchorDayOfMonth = recurrenceDueAnchorDayOfMonth,
 )
 
 fun ItemRelationEntity.toModel() = ItemRelation(
     id, fromItemId, toItemId, enumValueOf<RelationType>(type), createdAtEpochMillis,
 )
-

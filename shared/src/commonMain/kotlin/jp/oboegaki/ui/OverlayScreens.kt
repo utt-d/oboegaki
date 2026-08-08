@@ -69,9 +69,12 @@ import jp.oboegaki.core.model.AppItem
 import jp.oboegaki.core.model.AppSettings
 import jp.oboegaki.core.model.ItemKind
 import jp.oboegaki.core.model.Priority
+import jp.oboegaki.core.model.RecurrenceRule
+import jp.oboegaki.core.model.RecurrenceUnit
 import jp.oboegaki.core.model.RelationType
 import jp.oboegaki.core.model.ThemeDefinition
 import jp.oboegaki.core.model.TodoDetail
+import jp.oboegaki.core.domain.GroupPolicy
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
@@ -92,7 +95,7 @@ fun OverlayHost(
 ) {
     val relations by controller.relations.collectAsState()
     if (overlay is AppOverlay.Add) {
-        AddBottomSheet(overlay.defaultKind, sections.todos, settings, controller)
+        AddBottomSheet(overlay.defaultKind, sections, settings, controller)
         return
     }
     Surface(
@@ -104,7 +107,7 @@ fun OverlayHost(
             is AppOverlay.Add -> Unit
             is AppOverlay.Edit -> {
                 val item = allVisibleItems(sections).firstOrNull { it.id == overlay.itemId }
-                if (item == null) MissingOverlay(controller) else EditScreen(item, sections.todos, relations, settings, controller)
+                if (item == null) MissingOverlay(controller) else EditScreen(item, sections, relations, settings, controller)
             }
             is AppOverlay.Split -> {
                 val item = allVisibleItems(sections).firstOrNull { it.id == overlay.itemId }
@@ -122,7 +125,7 @@ fun OverlayHost(
 @Composable
 private fun AddBottomSheet(
     defaultKind: ItemKind,
-    allTodos: List<AppItem>,
+    sections: AllSections,
     settings: AppSettings,
     controller: AppController,
 ) {
@@ -187,7 +190,7 @@ private fun AddBottomSheet(
                     expanded = expanded,
                     onExpandedChange = { expanded = it && kind == ItemKind.TODO },
                     handleModifier = handleModifier,
-                    allTodos = allTodos,
+                    sections = sections,
                     settings = settings,
                     controller = controller,
                 )
@@ -229,36 +232,73 @@ private fun AddScreen(
     expanded: Boolean,
     onExpandedChange: (Boolean) -> Unit,
     handleModifier: Modifier,
-    allTodos: List<AppItem>,
+    sections: AllSections,
     settings: AppSettings,
     controller: AppController,
 ) {
+    val allTodos = sections.todos
+    val allItems = allVisibleItems(sections)
     var text by remember { mutableStateOf("") }
     var body by remember { mutableStateOf("") }
+    var isGroup by remember { mutableStateOf(false) }
+    var groupId by remember { mutableStateOf<String?>(null) }
     var priority by remember { mutableStateOf(Priority.NONE) }
     var estimated by remember { mutableStateOf("15") }
     var available by remember { mutableStateOf<Long?>(null) }
     var scheduled by remember { mutableStateOf<Long?>(null) }
     var due by remember { mutableStateOf<Long?>(null) }
+    var recurrenceUnit by remember { mutableStateOf<RecurrenceUnit?>(null) }
+    var recurrenceInterval by remember { mutableStateOf("1") }
+    var recurrenceEnd by remember { mutableStateOf<Long?>(null) }
     val prerequisites = remember { mutableStateListOf<String>() }
 
+    val availableGroups = when (kind) {
+        ItemKind.TODO -> sections.todoGroups
+        ItemKind.MEMO -> sections.memoGroups
+        ItemKind.UNSORTED -> emptyList()
+    }
+    LaunchedEffect(kind, availableGroups) {
+        if (kind == ItemKind.UNSORTED) {
+            isGroup = false
+            groupId = null
+        }
+        if (kind != ItemKind.TODO) recurrenceUnit = null
+        if (groupId != null && availableGroups.none { it.id == groupId }) groupId = null
+    }
+
+    fun todoDetail() = TodoDetail(
+        priority = priority,
+        estimatedMinutes = estimated.toIntOrNull()?.coerceIn(1, 1440),
+        availableFromEpochMillis = available,
+        scheduledAtEpochMillis = scheduled,
+        dueAtEpochMillis = due,
+        recurrence = recurrenceUnit?.let {
+            RecurrenceRule(it, recurrenceInterval.toIntOrNull()?.coerceIn(1, 999) ?: 1, recurrenceEnd)
+        },
+    )
+
     fun submit() {
-        controller.quickAdd(kind, text) { item ->
-            if (expanded && item.kind == ItemKind.TODO) {
-                controller.save(
-                    item.copy(
-                        body = body,
-                        todo = item.todo?.copy(
-                            priority = priority,
-                            estimatedMinutes = estimated.toIntOrNull()?.coerceIn(1, 1440),
-                            availableFromEpochMillis = available,
-                            scheduledAtEpochMillis = scheduled,
-                            dueAtEpochMillis = due,
-                        ),
-                    ),
-                    prerequisites.toSet(),
-                )
-            } else text = ""
+        if (isGroup) {
+            controller.createGroup(
+                kind,
+                text,
+                groupId,
+                if (kind == ItemKind.TODO) todoDetail() else null,
+                prerequisites.toSet(),
+            )
+            return
+        }
+        if (expanded && kind == ItemKind.TODO) {
+            controller.addDetailed(
+                kind = kind,
+                title = text,
+                body = body,
+                groupId = groupId,
+                detail = todoDetail(),
+                requiredBeforeIds = prerequisites.toSet(),
+            ) { text = "" }
+        } else {
+            controller.quickAdd(kind, text, groupId) { text = "" }
         }
     }
 
@@ -319,6 +359,27 @@ private fun AddScreen(
                     KindChoice("メモ", ItemKind.MEMO, kind, onKindChange)
                 }
             }
+            if (kind != ItemKind.UNSORTED) {
+                item {
+                    GroupPicker(
+                        title = "入れるグループ",
+                        selectedGroupId = groupId,
+                        groups = availableGroups,
+                        allItems = allItems,
+                        onSelect = { groupId = it },
+                    )
+                    Row(
+                        Modifier.fillMaxWidth().height(52.dp).clickable { isGroup = !isGroup },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Checkbox(isGroup, onCheckedChange = { isGroup = it })
+                        Column(Modifier.weight(1f)) {
+                            Text(if (kind == ItemKind.TODO) "やることグループとして追加" else "メモグループとして追加")
+                            Text("中に項目やグループを何階層でも追加できます", style = MaterialTheme.typography.caption)
+                        }
+                    }
+                }
+            }
             if (kind == ItemKind.TODO) {
                 item {
                     OutlinedButton(onClick = { onExpandedChange(!expanded) }, Modifier.fillMaxWidth().height(48.dp)) {
@@ -376,9 +437,24 @@ private fun AddScreen(
                     DateTimeField("行う時刻", scheduled) { scheduled = it }
                     DateTimeField("期限", due) { due = it }
                 }
+                item {
+                    RecurrenceEditor(
+                        unit = recurrenceUnit,
+                        interval = recurrenceInterval,
+                        endAt = recurrenceEnd,
+                        scheduledAt = scheduled,
+                        onUnitChange = { recurrenceUnit = it },
+                        onIntervalChange = { recurrenceInterval = it },
+                        onEndChange = { recurrenceEnd = it },
+                    )
+                }
             }
             item {
-                Button(onClick = ::submit, enabled = text.isNotBlank(), modifier = Modifier.fillMaxWidth().height(54.dp)) {
+                Button(
+                    onClick = ::submit,
+                    enabled = text.isNotBlank() && (recurrenceUnit == null || scheduled != null),
+                    modifier = Modifier.fillMaxWidth().height(54.dp),
+                ) {
                     Text("追加する")
                 }
             }
@@ -396,23 +472,35 @@ private fun RowScope.KindChoice(label: String, value: ItemKind, selected: ItemKi
 @Composable
 private fun EditScreen(
     source: AppItem,
-    allTodos: List<AppItem>,
+    sections: AllSections,
     relations: List<jp.oboegaki.core.model.ItemRelation>,
     settings: AppSettings,
     controller: AppController,
 ) {
+    val allItems = allVisibleItems(sections)
+    val allTodos = sections.todos
     var kind by remember(source.id) { mutableStateOf(source.kind) }
     var title by remember(source.id) { mutableStateOf(source.title) }
     var body by remember(source.id) { mutableStateOf(source.body) }
+    var groupId by remember(source.id) { mutableStateOf(source.groupId) }
     var priority by remember(source.id) { mutableStateOf(source.todo?.priority ?: Priority.NONE) }
     var estimated by remember(source.id) { mutableStateOf(source.todo?.estimatedMinutes?.toString() ?: "") }
     var available by remember(source.id) { mutableStateOf(source.todo?.availableFromEpochMillis) }
     var scheduled by remember(source.id) { mutableStateOf(source.todo?.scheduledAtEpochMillis) }
     var due by remember(source.id) { mutableStateOf(source.todo?.dueAtEpochMillis) }
+    var recurrenceUnit by remember(source.id) { mutableStateOf(source.todo?.recurrence?.unit) }
+    var recurrenceInterval by remember(source.id) { mutableStateOf(source.todo?.recurrence?.interval?.toString() ?: "1") }
+    var recurrenceEnd by remember(source.id) { mutableStateOf(source.todo?.recurrence?.endAtEpochMillis) }
     val prerequisites = remember(source.id, relations) {
         mutableStateListOf<String>().apply {
             addAll(relations.filter { it.toItemId == source.id && it.type == RelationType.REQUIRED_BEFORE }.map { it.fromItemId })
         }
+    }
+    val candidateGroups = GroupPolicy.availableParents(source.copy(kind = kind), allItems)
+    LaunchedEffect(kind, candidateGroups) {
+        if (kind == ItemKind.UNSORTED) groupId = null
+        if (kind != ItemKind.TODO) recurrenceUnit = null
+        if (groupId != null && candidateGroups.none { it.id == groupId }) groupId = null
     }
 
     fun draftItem(): AppItem {
@@ -422,8 +510,11 @@ private fun EditScreen(
             availableFromEpochMillis = available,
             scheduledAtEpochMillis = scheduled,
             dueAtEpochMillis = due,
+            recurrence = recurrenceUnit?.let {
+                RecurrenceRule(it, recurrenceInterval.toIntOrNull()?.coerceIn(1, 999) ?: 1, recurrenceEnd)
+            },
         ) else null
-        return source.copy(kind = kind, title = title, body = body, todo = detail)
+        return source.copy(kind = kind, title = title, body = body, groupId = groupId, todo = detail)
     }
 
     fun save() {
@@ -443,18 +534,31 @@ private fun EditScreen(
                 Modifier.fillMaxWidth().weight(1f),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-            item {
-                Text("種類", style = MaterialTheme.typography.subtitle1)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    KindChoice("あとで分ける", ItemKind.UNSORTED, kind) { kind = it }
-                    KindChoice("やること", ItemKind.TODO, kind) { kind = it }
-                    KindChoice("メモ", ItemKind.MEMO, kind) { kind = it }
+            if (!source.isGroup) {
+                item {
+                    Text("種類", style = MaterialTheme.typography.subtitle1)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        KindChoice("あとで分ける", ItemKind.UNSORTED, kind) { kind = it }
+                        KindChoice("やること", ItemKind.TODO, kind) { kind = it }
+                        KindChoice("メモ", ItemKind.MEMO, kind) { kind = it }
+                    }
                 }
+            } else item {
+                Text(if (kind == ItemKind.TODO) "やることグループ" else "メモグループ", style = MaterialTheme.typography.subtitle1)
             }
             item {
                 OutlinedTextField(title, { title = it.take(200) }, Modifier.fillMaxWidth(), label = { Text("タイトル") })
                 Spacer(Modifier.height(10.dp))
                 OutlinedTextField(body, { body = it.take(100_000) }, Modifier.fillMaxWidth(), label = { Text("本文") }, minLines = 4, maxLines = 12)
+            }
+            if (kind != ItemKind.UNSORTED) item {
+                GroupPicker(
+                    title = "入れるグループ",
+                    selectedGroupId = groupId,
+                    groups = candidateGroups,
+                    allItems = allItems,
+                    onSelect = { groupId = it },
+                )
             }
             if (kind == ItemKind.TODO) {
                 item {
@@ -491,6 +595,17 @@ private fun EditScreen(
                     DateTimeField("いつからできる？", available) { available = it }
                     DateTimeField("行う時刻", scheduled) { scheduled = it }
                     DateTimeField("期限", due) { due = it }
+                }
+                item {
+                    RecurrenceEditor(
+                        unit = recurrenceUnit,
+                        interval = recurrenceInterval,
+                        endAt = recurrenceEnd,
+                        scheduledAt = scheduled,
+                        onUnitChange = { recurrenceUnit = it },
+                        onIntervalChange = { recurrenceInterval = it },
+                        onEndChange = { recurrenceEnd = it },
+                    )
                 }
                 if (settings.calendarIntegrationEnabled) item {
                     val hasCalendarDate = scheduled != null || due != null || available != null
@@ -538,12 +653,127 @@ private fun EditScreen(
                 ) { Text("閉じる") }
                 Button(
                     onClick = ::save,
-                    enabled = title.isNotBlank(),
+                    enabled = title.isNotBlank() && (recurrenceUnit == null || scheduled != null),
                     modifier = Modifier.weight(1f).height(52.dp),
                 ) { Text("保存") }
             }
         }
     }
+}
+
+@Composable
+private fun GroupPicker(
+    title: String,
+    selectedGroupId: String?,
+    groups: List<AppItem>,
+    allItems: List<AppItem>,
+    onSelect: (String?) -> Unit,
+) {
+    Column(Modifier.fillMaxWidth()) {
+        Text(title, style = MaterialTheme.typography.subtitle1)
+        Spacer(Modifier.height(6.dp))
+        if (selectedGroupId == null) {
+            Button(onClick = { onSelect(null) }, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text("グループなし") }
+        } else {
+            OutlinedButton(onClick = { onSelect(null) }, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text("グループなし") }
+        }
+        groups.forEach { group ->
+            val breadcrumb = GroupPolicy.breadcrumb(group, allItems)
+            val label = if (breadcrumb.isBlank()) group.title else "$breadcrumb › ${group.title}"
+            Spacer(Modifier.height(6.dp))
+            if (selectedGroupId == group.id) {
+                Button(onClick = { onSelect(group.id) }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                    Text(label, textAlign = TextAlign.Start)
+                }
+            } else {
+                OutlinedButton(onClick = { onSelect(group.id) }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                    Text(label, textAlign = TextAlign.Start)
+                }
+            }
+        }
+        if (groups.isEmpty()) {
+            Text("作成済みのグループはありません", style = MaterialTheme.typography.caption, color = parseColor(LocalThemeColors.current.textSecondary))
+        }
+    }
+}
+
+@Composable
+private fun RecurrenceEditor(
+    unit: RecurrenceUnit?,
+    interval: String,
+    endAt: Long?,
+    scheduledAt: Long?,
+    onUnitChange: (RecurrenceUnit?) -> Unit,
+    onIntervalChange: (String) -> Unit,
+    onEndChange: (Long?) -> Unit,
+) {
+    Column(Modifier.fillMaxWidth()) {
+        Text("定期設定", style = MaterialTheme.typography.subtitle1)
+        Text(
+            "完了すると、次の予定が自動で作られます。グループは中身もまとめて複製します。",
+            style = MaterialTheme.typography.caption,
+            color = parseColor(LocalThemeColors.current.textSecondary),
+        )
+        Spacer(Modifier.height(8.dp))
+        val choices = listOf<Pair<String, RecurrenceUnit?>>() + listOf(
+            "設定しない" to null,
+            "日ごと" to RecurrenceUnit.DAY,
+            "週ごと" to RecurrenceUnit.WEEK,
+            "月ごと" to RecurrenceUnit.MONTH,
+            "年ごと" to RecurrenceUnit.YEAR,
+        )
+        choices.chunked(2).forEach { row ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                row.forEach { (label, value) ->
+                    if (value == unit) Button(onClick = { onUnitChange(value) }, Modifier.weight(1f).height(48.dp)) { Text(label) }
+                    else OutlinedButton(onClick = { onUnitChange(value) }, Modifier.weight(1f).height(48.dp)) { Text(label) }
+                }
+                if (row.size == 1) Spacer(Modifier.weight(1f))
+            }
+            Spacer(Modifier.height(6.dp))
+        }
+        if (unit != null) {
+            OutlinedTextField(
+                value = interval,
+                onValueChange = { onIntervalChange(it.filter(Char::isDigit).take(3)) },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("何${unit.label}ごと（1〜999）") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            )
+            DateOnlyField("繰り返しの終了日", endAt, onEndChange)
+            if (scheduledAt == null) {
+                Text(
+                    "定期設定を使うには「行う時刻」を設定してください",
+                    color = MaterialTheme.colors.error,
+                    style = MaterialTheme.typography.caption,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DateOnlyField(label: String, value: Long?, onChange: (Long?) -> Unit) {
+    var selectingDate by remember { mutableStateOf(false) }
+    val local = value?.let { Instant.fromEpochMilliseconds(it).toLocalDateTime(TimeZone.currentSystemDefault()) }
+    Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+        Text(label, style = MaterialTheme.typography.subtitle1)
+        OutlinedButton(onClick = { selectingDate = true }, modifier = Modifier.fillMaxWidth().height(52.dp)) {
+            Text(local?.let(::formatDatePart) ?: "終了日を設定しない")
+        }
+        if (value != null) TextButton(onClick = { onChange(null) }, modifier = Modifier.align(Alignment.End).height(42.dp)) {
+            Text("終了日を解除")
+        }
+    }
+    if (selectingDate) CalendarDatePickerDialog(
+        label = label,
+        value = value,
+        onDismiss = { selectingDate = false },
+        onConfirm = { date ->
+            onChange(replaceDate(value, date))
+            selectingDate = false
+        },
+    )
 }
 
 @Composable
@@ -906,7 +1136,7 @@ private fun MissingOverlay(controller: AppController) {
 }
 
 private fun allVisibleItems(sections: AllSections) =
-    sections.unsorted + sections.todos + sections.memos + sections.completed + sections.archived
+    sections.unsorted + sections.todoGroups + sections.todos + sections.memoGroups + sections.memos + sections.completed + sections.archived
 
 private fun localDateTime(epoch: Long?): LocalDateTime {
     val instant = epoch?.let(Instant::fromEpochMilliseconds)

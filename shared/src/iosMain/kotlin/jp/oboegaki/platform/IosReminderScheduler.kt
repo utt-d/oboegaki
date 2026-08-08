@@ -52,8 +52,9 @@ class IosReminderScheduler : ReminderScheduler {
         center.removeDeliveredNotificationsWithIdentifiers(listOf(itemId))
     }
 
-    override suspend fun reconcileAll(reminders: List<Reminder>) {
+    override suspend fun reconcileAll(reminders: List<Reminder>, staleItemIds: Set<String>) {
         center.removeAllPendingNotificationRequests()
+        staleItemIds.forEach { cancel(it) }
         reminders.forEach { schedule(it) }
     }
 

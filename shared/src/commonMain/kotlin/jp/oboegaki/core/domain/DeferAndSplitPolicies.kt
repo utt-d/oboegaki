@@ -61,6 +61,7 @@ object SplitPolicy {
                 title = title,
                 body = if (index == 0) parent.body else "",
                 manualRank = parent.manualRank + index,
+                groupId = parent.groupId,
                 parentId = parent.id,
                 createdAtEpochMillis = now,
                 updatedAtEpochMillis = now,
@@ -74,4 +75,3 @@ object SplitPolicy {
         }
     }
 }
-

@@ -1,11 +1,15 @@
 .gradle/
 .idea/
+.codex/
 **/build/
 local.properties
 *.iml
 *.log
 .DS_Store
 captures/
+*.jks
+*.keystore
+release-signing/
 iosApp/Pods/
 iosApp/*.xcodeproj/
 window-*.xml

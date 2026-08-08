@@ -345,6 +345,7 @@ private fun TabScreen(
         )
         MainTab.ALL -> AllItemsScreen(
             sections,
+            controller.relations.collectAsState().value,
             settings.addButtonPosition,
             settings.addButtonBottomOffsetDp,
             controller,

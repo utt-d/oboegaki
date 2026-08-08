@@ -10,6 +10,8 @@
 - カードの距離・速度判定は外観設定に影響されず、短く速いスワイプにも反応します。
 - 端末の戻る操作は、テーマ編集や設定など一つ前の画面へ戻ります。
 - 操作ガイドは「すべて」→「設定」からいつでも再表示できます。
+- やることとメモは、それぞれ種類を混ぜずに無制限の階層でグループ化できます。
+- やることとやることグループには、日・週・月・年単位の定期設定と終了日を設定できます。完了時に次回分を作成します。
 
 ## 開発環境
 
@@ -25,6 +27,8 @@ $env:JAVA_HOME = 'C:\Program Files\Android\Android Studio\jbr'
 ```
 
 APKは `androidApp/build/outputs/apk/debug/androidApp-debug.apk` に生成されます。
+
+署名付き公開版の作成、プライバシー、Android/iOSの無料配布範囲は [PUBLISHING.md](PUBLISHING.md)、[PRIVACY.md](PRIVACY.md)、[SECURITY.md](SECURITY.md) を参照してください。
 
 ## iOS
 

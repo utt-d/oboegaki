@@ -2,6 +2,7 @@ package jp.oboegaki.core.domain
 
 import jp.oboegaki.core.model.AppItem
 import jp.oboegaki.core.model.ItemKind
+import jp.oboegaki.core.model.ItemLifecycle
 import jp.oboegaki.core.model.ItemRelation
 import jp.oboegaki.core.model.Priority
 import jp.oboegaki.core.model.RelationType
@@ -55,6 +56,192 @@ class OrderingPolicyTest {
         assertTrue(OrderingPolicy.wouldCreateCycle(relations, "b", "a"))
     }
 
+    @Test
+    fun importedRelationsDiscardDanglingAndCycleEdgesDeterministically() {
+        val a = todo("a", 1)
+        val b = todo("b", 2)
+        val c = todo("c", 3)
+        val low = todo("low", 4, priority = Priority.LOW)
+        val high = todo("high", 5, priority = Priority.HIGH)
+        val relations = listOf(
+            ItemRelation("z-cycle", "c", "a", RelationType.REQUIRED_BEFORE, 3),
+            ItemRelation("a-edge", "a", "b", RelationType.REQUIRED_BEFORE, 1),
+            ItemRelation("missing", "missing", "a", RelationType.REQUIRED_BEFORE, 0),
+            ItemRelation("b-edge", "b", "c", RelationType.REQUIRED_BEFORE, 2),
+            ItemRelation("priority-conflict", low.id, high.id, RelationType.REQUIRED_BEFORE, 4),
+        )
+
+        val safe = OrderingPolicy.sanitizeRelations(listOf(a, b, c, low, high), relations)
+
+        assertEquals(listOf("a-edge", "b-edge"), safe.map { it.id })
+    }
+
+    @Test
+    fun proposedPrerequisiteRejectsDanglingEndpoint() {
+        val target = todo("target", 1)
+        val result = OrderingPolicy.validateProposedPrerequisites(
+            listOf(target),
+            emptyList(),
+            target,
+            setOf("missing"),
+        )
+
+        assertIs<PrerequisiteValidation.Invalid>(result)
+        assertEquals(PrerequisiteRejectionReason.DANGLING_ENDPOINT, result.reason)
+    }
+
+    @Test
+    fun proposedPrerequisiteRejectsInactiveEndpoint() {
+        val inactive = todo("inactive", 1).copy(lifecycle = ItemLifecycle.COMPLETED)
+        val target = todo("target", 2)
+        val result = OrderingPolicy.validateProposedPrerequisites(
+            listOf(inactive, target),
+            emptyList(),
+            target,
+            setOf(inactive.id),
+        )
+
+        assertIs<PrerequisiteValidation.Invalid>(result)
+        assertEquals(PrerequisiteRejectionReason.INACTIVE_ENDPOINT, result.reason)
+    }
+
+    @Test
+    fun proposedPrerequisiteRejectsNonTodoEndpoint() {
+        val memo = todo("memo", 1).copy(kind = ItemKind.MEMO, todo = null)
+        val target = todo("target", 2)
+        val result = OrderingPolicy.validateProposedPrerequisites(
+            listOf(memo, target),
+            emptyList(),
+            target,
+            setOf(memo.id),
+        )
+
+        assertIs<PrerequisiteValidation.Invalid>(result)
+        assertEquals(PrerequisiteRejectionReason.NON_TODO_ENDPOINT, result.reason)
+    }
+
+    @Test
+    fun proposedPrerequisiteRejectsDifferentGroupBranch() {
+        val from = todo("from", 1).copy(groupId = "group-a")
+        val target = todo("target", 2).copy(groupId = "group-b")
+
+        val result = OrderingPolicy.validateProposedPrerequisites(
+            listOf(from, target),
+            emptyList(),
+            target,
+            setOf(from.id),
+        )
+
+        assertIs<PrerequisiteValidation.Invalid>(result)
+        assertEquals(PrerequisiteRejectionReason.DIFFERENT_GROUP, result.reason)
+    }
+
+    @Test
+    fun importedRelationsDiscardDifferentGroupBranch() {
+        val from = todo("from", 1).copy(groupId = "group-a")
+        val target = todo("target", 2).copy(groupId = "group-b")
+        val relation = ItemRelation("cross", from.id, target.id, RelationType.REQUIRED_BEFORE, 0)
+
+        assertTrue(OrderingPolicy.sanitizeRelations(listOf(from, target), listOf(relation)).isEmpty())
+    }
+
+    @Test
+    fun proposedPrerequisiteRejectsScheduledAndUnscheduledConflict() {
+        val unscheduled = todo("unscheduled", 1)
+        val scheduled = todo("scheduled", 2, scheduledAt = 10)
+        val result = OrderingPolicy.validateProposedPrerequisites(
+            listOf(unscheduled, scheduled),
+            emptyList(),
+            scheduled,
+            setOf(unscheduled.id),
+        )
+
+        assertIs<PrerequisiteValidation.Invalid>(result)
+        assertEquals(PrerequisiteRejectionReason.SCHEDULE_CONFLICT, result.reason)
+    }
+
+    @Test
+    fun proposedPrerequisiteRejectsReversedScheduledTime() {
+        val early = todo("early", 1, scheduledAt = 10)
+        val late = todo("late", 2, scheduledAt = 11)
+        val result = OrderingPolicy.validateProposedPrerequisites(
+            listOf(early, late),
+            emptyList(),
+            early,
+            setOf(late.id),
+        )
+
+        assertIs<PrerequisiteValidation.Invalid>(result)
+        assertEquals(PrerequisiteRejectionReason.SCHEDULE_CONFLICT, result.reason)
+    }
+
+    @Test
+    fun proposedPrerequisiteRejectsPriorityConflictWithinScheduleGroup() {
+        val low = todo("low", 1, scheduledAt = 10, priority = Priority.LOW)
+        val high = todo("high", 2, scheduledAt = 10, priority = Priority.HIGH)
+        val result = OrderingPolicy.validateProposedPrerequisites(
+            listOf(low, high),
+            emptyList(),
+            high,
+            setOf(low.id),
+        )
+
+        assertIs<PrerequisiteValidation.Invalid>(result)
+        assertEquals(PrerequisiteRejectionReason.PRIORITY_CONFLICT, result.reason)
+    }
+
+    @Test
+    fun proposedPrerequisiteRejectsCycle() {
+        val a = todo("a", 1)
+        val b = todo("b", 2)
+        val relation = ItemRelation("r", a.id, b.id, RelationType.REQUIRED_BEFORE, 0)
+        val result = OrderingPolicy.validateProposedPrerequisites(
+            listOf(a, b),
+            listOf(relation),
+            a,
+            setOf(b.id),
+        )
+
+        assertIs<PrerequisiteValidation.Invalid>(result)
+        assertEquals(PrerequisiteRejectionReason.CYCLE, result.reason)
+    }
+
+    @Test
+    fun proposedPrerequisiteAcceptsImmutableOrderCompatibleRelation() {
+        val early = todo("early", 1, scheduledAt = 10)
+        val late = todo("late", 2, scheduledAt = 11)
+        val result = OrderingPolicy.validateProposedPrerequisites(
+            listOf(early, late),
+            emptyList(),
+            late,
+            setOf(early.id),
+        )
+
+        assertIs<PrerequisiteValidation.Valid>(result)
+    }
+
+    @Test
+    fun canonicalSortIgnoresLegacyRelationThatConflictsWithImmutableOrder() {
+        val early = todo("early", 1, scheduledAt = 10)
+        val late = todo("late", 2, scheduledAt = 11)
+        val legacy = ItemRelation("legacy", late.id, early.id, RelationType.REQUIRED_BEFORE, 0)
+
+        assertEquals(listOf("early", "late"), OrderingPolicy.canonicalSort(listOf(late, early), listOf(legacy)).map { it.id })
+    }
+
+    @Test
+    fun changingToNonTodoRetainsNeitherRelationDirection() {
+        val relations = listOf(
+            ItemRelation("in", "before", "changed", RelationType.REQUIRED_BEFORE, 0),
+            ItemRelation("out", "changed", "after", RelationType.RECOMMENDED_BEFORE, 1),
+            ItemRelation("other", "before", "after", RelationType.RECOMMENDED_BEFORE, 2),
+        )
+
+        val retained = OrderingPolicy.relationsAfterKindChange("changed", ItemKind.MEMO, relations)
+
+        assertEquals(listOf("other"), retained.map { it.id })
+    }
+
     private fun todo(
         id: String,
         rank: Long,
@@ -70,4 +257,3 @@ class OrderingPolicyTest {
         todo = TodoDetail(scheduledAtEpochMillis = scheduledAt?.times(60_000L), priority = priority),
     )
 }
-

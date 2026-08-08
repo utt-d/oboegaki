@@ -4,8 +4,13 @@ import androidx.room.immediateTransaction
 import androidx.room.useWriterConnection
 import jp.oboegaki.core.domain.DeferDecision
 import jp.oboegaki.core.domain.DeferPolicy
+import jp.oboegaki.core.domain.GroupPlacementDecision
+import jp.oboegaki.core.domain.GroupPolicy
 import jp.oboegaki.core.domain.MoveDecision
 import jp.oboegaki.core.domain.OrderingPolicy
+import jp.oboegaki.core.domain.PrerequisiteValidation
+import jp.oboegaki.core.domain.RecurrencePolicy
+import jp.oboegaki.core.domain.RecurrenceValidation
 import jp.oboegaki.core.domain.SplitPolicy
 import jp.oboegaki.core.domain.SplitValidation
 import jp.oboegaki.core.domain.ThemePolicy
@@ -16,6 +21,7 @@ import jp.oboegaki.core.model.AppSettings
 import jp.oboegaki.core.model.ItemKind
 import jp.oboegaki.core.model.ItemLifecycle
 import jp.oboegaki.core.model.ItemRelation
+import jp.oboegaki.core.model.RelationType
 import jp.oboegaki.core.model.ThemeDefinition
 import jp.oboegaki.core.model.TodoDetail
 import jp.oboegaki.platform.NoOpReminderScheduler
@@ -37,7 +43,22 @@ interface ItemRepository {
     fun observeThemes(): Flow<List<ThemeDefinition>>
     fun observeSettings(): Flow<AppSettings>
     suspend fun getItem(id: String): AppItem?
-    suspend fun quickAdd(kind: ItemKind, text: String): AppItem?
+    suspend fun quickAdd(kind: ItemKind, text: String, groupId: String? = null): AppItem?
+    suspend fun addDetailed(
+        kind: ItemKind,
+        title: String,
+        body: String,
+        groupId: String?,
+        detail: TodoDetail?,
+        requiredBeforeIds: Set<String> = emptySet(),
+    ): AppItem?
+    suspend fun createGroup(
+        kind: ItemKind,
+        title: String,
+        groupId: String?,
+        detail: TodoDetail?,
+        requiredBeforeIds: Set<String> = emptySet(),
+    ): AppItem?
     suspend fun save(item: AppItem, requiredBeforeIds: Set<String>? = null): AppItem
     suspend fun delete(id: String)
     suspend fun complete(id: String)
@@ -48,6 +69,7 @@ interface ItemRepository {
     suspend fun validateMove(id: String, destinationIndex: Int): MoveDecision
     suspend fun move(id: String, destinationIndex: Int): MoveDecision
     suspend fun moveFree(id: String, destinationIndex: Int)
+    suspend fun moveWithinGroup(id: String, direction: Int): MoveDecision
     suspend fun split(id: String, titles: List<String>): SplitValidation
     suspend fun postponeSplitPrompt(id: String, threshold: Int)
     suspend fun disableSplitPrompt(id: String)
@@ -59,18 +81,28 @@ interface ItemRepository {
     suspend fun importBackupJson(value: String): BackupImportResult
 }
 
-data class BackupImportResult(val importedItems: Int, val rejectedItems: Int, val message: String)
+data class BackupImportResult(
+    val importedItems: Int,
+    val rejectedItems: Int,
+    val message: String,
+    val correctedRelations: Int = 0,
+    val successful: Boolean = false,
+)
 
 @Serializable
 private data class DataSnapshot(
     val items: List<AppItem>,
     val relations: List<ItemRelation>,
+    // Nullable defaults preserve themes/settings when decoding an operation
+    // snapshot written before those fields existed.
+    val customThemes: List<ThemeDefinition>? = null,
+    val settings: AppSettings? = null,
 )
 
 @Serializable
 private data class BackupManifest(
-    val schemaVersion: Int = 1,
-    val appVersion: String = "0.1.0",
+    val schemaVersion: Int = 4,
+    val appVersion: String = "0.2.0",
     val createdAtEpochMillis: Long,
 )
 
@@ -79,8 +111,8 @@ private data class BackupEnvelope(
     val manifest: BackupManifest,
     val items: List<AppItem>,
     val relations: List<ItemRelation>,
-    val themes: List<ThemeDefinition>,
-    val settings: AppSettings,
+    val themes: List<ThemeDefinition> = emptyList(),
+    val settings: AppSettings = AppSettings(),
 )
 
 class RoomItemRepository(
@@ -104,14 +136,19 @@ class RoomItemRepository(
         itemModels, observeRelations(),
     ) { items, relations ->
         val activeTodos = OrderingPolicy.canonicalSort(
-            items.filter { it.kind == ItemKind.TODO && it.lifecycle == ItemLifecycle.ACTIVE },
+            items.filter { it.kind == ItemKind.TODO && it.lifecycle == ItemLifecycle.ACTIVE && !it.isGroup },
             relations,
         )
         AllSections(
             unsorted = items.filter { it.kind == ItemKind.UNSORTED && it.lifecycle == ItemLifecycle.ACTIVE }
                 .sortedBy { it.manualRank },
             todos = activeTodos,
+            todoGroups = items.filter { it.kind == ItemKind.TODO && it.lifecycle == ItemLifecycle.ACTIVE && it.isGroup }
+                .sortedBy { it.manualRank },
             memos = items.filter { it.kind == ItemKind.MEMO && it.lifecycle == ItemLifecycle.ACTIVE }
+                .filterNot { it.isGroup }
+                .sortedBy { it.manualRank },
+            memoGroups = items.filter { it.kind == ItemKind.MEMO && it.lifecycle == ItemLifecycle.ACTIVE && it.isGroup }
                 .sortedBy { it.manualRank },
             completed = items.filter { it.kind == ItemKind.TODO && it.lifecycle == ItemLifecycle.COMPLETED }
                 .sortedByDescending { it.completedAtEpochMillis },
@@ -134,34 +171,138 @@ class RoomItemRepository(
     override suspend fun getItem(id: String): AppItem? =
         dao.getItem(id)?.toModel(dao.getTodoDetail(id))
 
-    override suspend fun quickAdd(kind: ItemKind, text: String): AppItem? {
+    override suspend fun quickAdd(kind: ItemKind, text: String, groupId: String?): AppItem? {
         val clean = text.trim()
         if (clean.isEmpty()) return null
         val title = clean.take(200)
         val body = if (clean.length > 200) clean.drop(200).trim() else ""
         val now = now()
         val rank = (dao.getItems().maxOfOrNull { it.manualRank } ?: 0L) + 1_000L
-        val item = AppItem(
+        val item = RecurrencePolicy.normalize(AppItem(
             id = newId(), kind = kind, title = title, body = body, manualRank = rank,
+            groupId = groupId,
             createdAtEpochMillis = now, updatedAtEpochMillis = now,
             todo = if (kind == ItemKind.TODO) TodoDetail() else null,
-        )
+        ))
+        val placement = GroupPolicy.validatePlacement(item, groupId, currentState().items)
+        if (placement is GroupPlacementDecision.Rejected) return null
         mutate("CREATE") { upsert(item) }
         return item
     }
 
+    override suspend fun addDetailed(
+        kind: ItemKind,
+        title: String,
+        body: String,
+        groupId: String?,
+        detail: TodoDetail?,
+        requiredBeforeIds: Set<String>,
+    ): AppItem? {
+        val cleanTitle = title.trim().take(200)
+        if (cleanTitle.isEmpty()) return null
+        val state = currentState()
+        val time = now()
+        val item = RecurrencePolicy.normalize(AppItem(
+            id = newId(),
+            kind = kind,
+            title = cleanTitle,
+            body = body.take(100_000),
+            manualRank = (state.items.maxOfOrNull { it.manualRank } ?: 0L) + 1_000L,
+            groupId = groupId,
+            createdAtEpochMillis = time,
+            updatedAtEpochMillis = time,
+            todo = if (kind == ItemKind.TODO) detail ?: TodoDetail() else null,
+        ))
+        if (GroupPolicy.validatePlacement(item, groupId, state.items) !is GroupPlacementDecision.Allowed) return null
+        if (RecurrencePolicy.validate(item) is RecurrenceValidation.Invalid) return null
+        val validation = OrderingPolicy.validateProposedPrerequisites(
+            state.items,
+            OrderingPolicy.sanitizeRelations(state.items, state.relations),
+            item,
+            requiredBeforeIds,
+        )
+        if (validation !is PrerequisiteValidation.Valid) return null
+
+        mutate("CREATE_DETAILED") {
+            upsert(item)
+            insertPrerequisites(item.id, requiredBeforeIds, time)
+        }
+        syncReminder(item)
+        return item
+    }
+
+    override suspend fun createGroup(
+        kind: ItemKind,
+        title: String,
+        groupId: String?,
+        detail: TodoDetail?,
+        requiredBeforeIds: Set<String>,
+    ): AppItem? {
+        val cleanTitle = title.trim().take(200)
+        if (cleanTitle.isEmpty() || kind == ItemKind.UNSORTED) return null
+        val time = now()
+        val item = RecurrencePolicy.normalize(AppItem(
+            id = newId(),
+            kind = kind,
+            title = cleanTitle,
+            body = "",
+            manualRank = (dao.getItems().maxOfOrNull { it.manualRank } ?: 0L) + 1_000L,
+            isGroup = true,
+            groupId = groupId,
+            createdAtEpochMillis = time,
+            updatedAtEpochMillis = time,
+            todo = if (kind == ItemKind.TODO) detail ?: TodoDetail(estimatedMinutes = null) else null,
+        ))
+        val state = currentState()
+        val placement = GroupPolicy.validatePlacement(item, groupId, state.items)
+        if (placement is GroupPlacementDecision.Rejected) return null
+        val recurrence = RecurrencePolicy.validate(item)
+        if (recurrence is RecurrenceValidation.Invalid) return null
+        val validation = OrderingPolicy.validateProposedPrerequisites(
+            state.items,
+            OrderingPolicy.sanitizeRelations(state.items, state.relations),
+            item,
+            requiredBeforeIds,
+        )
+        if (validation !is PrerequisiteValidation.Valid) return null
+        mutate("CREATE_GROUP") {
+            upsert(item)
+            insertPrerequisites(item.id, requiredBeforeIds, time)
+        }
+        syncReminder(item)
+        return item
+    }
+
     override suspend fun save(item: AppItem, requiredBeforeIds: Set<String>?): AppItem {
-        val clean = item.copy(
+        val clean = RecurrencePolicy.normalize(item.copy(
             title = item.title.trim().take(200),
             body = item.body.take(100_000),
             updatedAtEpochMillis = now(),
             revision = item.revision + 1,
             todo = if (item.kind == ItemKind.TODO) item.todo ?: TodoDetail() else null,
-        )
+        ))
         require(clean.title.isNotEmpty()) { "タイトルを入力してください" }
-        if (requiredBeforeIds != null) {
+        require(!clean.isGroup || clean.kind != ItemKind.UNSORTED) { "あとで分ける項目はグループにできません" }
+        val stateForValidation = currentState()
+        when (val placement = GroupPolicy.validatePlacement(clean, clean.groupId, stateForValidation.items)) {
+            GroupPlacementDecision.Allowed -> Unit
+            is GroupPlacementDecision.Rejected -> throw IllegalArgumentException(placement.message)
+        }
+        when (val recurrence = RecurrencePolicy.validate(clean)) {
+            RecurrenceValidation.Valid -> Unit
+            is RecurrenceValidation.Invalid -> throw IllegalArgumentException(recurrence.message)
+        }
+        if (clean.isGroup) {
+            val children = stateForValidation.items.filter { it.groupId == clean.id }
+            require(children.all { it.kind == clean.kind }) { "中の項目と異なる種類には変更できません" }
+        }
+        /*
+        if (false) {
             val state = currentState()
-            val unrelated = state.relations.filterNot { it.toItemId == clean.id && it.type == jp.oboegaki.core.model.RelationType.REQUIRED_BEFORE }
+            require(validPrerequisites(requiredBeforeIds, clean, state.items, allowCurrent = true)) {
+                "前提にできるのは既存の有効なやることだけです"
+            }
+            val unrelated = state.relations.filterNot { it.toItemId == clean.id && it.type == RelationType.REQUIRED_BEFORE }
             requiredBeforeIds.forEach { prerequisiteId ->
                 if (OrderingPolicy.wouldCreateCycle(unrelated, prerequisiteId, clean.id)) {
                     throw IllegalArgumentException("前後関係が循環するため保存できません")
@@ -173,35 +314,125 @@ class RoomItemRepository(
                 requiredBeforeIds.forEach { prerequisiteId ->
                     dao.upsertRelation(ItemRelation(
                         id = newId(), fromItemId = prerequisiteId, toItemId = clean.id,
-                        type = jp.oboegaki.core.model.RelationType.REQUIRED_BEFORE,
+                        type = RelationType.REQUIRED_BEFORE,
                         createdAtEpochMillis = now(),
                     ).toEntity())
                 }
             }
-        } else mutate("UPDATE") { upsert(clean) }
+        }
+        */
+        val current = currentState()
+        val prospectiveItems = current.items.filterNot { it.id == clean.id } + clean
+        val safeExistingRelations = OrderingPolicy.sanitizeRelations(current.items, current.relations)
+        if (requiredBeforeIds != null && clean.kind == ItemKind.TODO) {
+            val validation = OrderingPolicy.validateProposedPrerequisites(
+                prospectiveItems,
+                safeExistingRelations,
+                clean,
+                requiredBeforeIds,
+            )
+            if (validation is PrerequisiteValidation.Invalid) {
+                throw IllegalArgumentException(validation.message)
+            }
+            val relationTime = now()
+            val replacementRelations = safeExistingRelations
+                .filterNot { it.toItemId == clean.id && it.type == RelationType.REQUIRED_BEFORE }
+                .plus(
+                    requiredBeforeIds.sorted().map { prerequisiteId ->
+                        ItemRelation(
+                            id = newId(),
+                            fromItemId = prerequisiteId,
+                            toItemId = clean.id,
+                            type = RelationType.REQUIRED_BEFORE,
+                            createdAtEpochMillis = relationTime,
+                        )
+                    },
+                )
+            mutate("UPDATE") {
+                upsert(clean)
+                dao.clearRelations()
+                dao.upsertRelations(replacementRelations.map(ItemRelation::toEntity))
+            }
+        } else {
+            val relationsWithoutChangedItem = OrderingPolicy.relationsAfterKindChange(
+                clean.id,
+                clean.kind,
+                current.relations,
+            )
+            val safeRelations = OrderingPolicy.sanitizeRelations(prospectiveItems, relationsWithoutChangedItem)
+            mutate("UPDATE") {
+                upsert(clean)
+                if (safeRelations != current.relations) {
+                    dao.clearRelations()
+                    dao.upsertRelations(safeRelations.map(ItemRelation::toEntity))
+                }
+            }
+        }
         syncReminder(clean)
         return clean
     }
 
     override suspend fun delete(id: String) {
         val item = getItem(id) ?: return
-        mutate("DELETE") { upsert(item.copy(lifecycle = ItemLifecycle.DELETED, updatedAtEpochMillis = now())) }
+        val time = now()
+        val children = if (item.isGroup) currentState().items.filter { it.groupId == item.id } else emptyList()
+        mutate("DELETE") {
+            children.forEach { upsert(it.copy(groupId = item.groupId, updatedAtEpochMillis = time)) }
+            upsert(item.copy(lifecycle = ItemLifecycle.DELETED, updatedAtEpochMillis = time))
+        }
         reminderScheduler.cancel(id)
     }
 
     override suspend fun complete(id: String) {
         val item = getItem(id) ?: return
+        if (item.lifecycle != ItemLifecycle.ACTIVE) return
         val time = now()
-        mutate("COMPLETE") {
-            upsert(item.copy(lifecycle = ItemLifecycle.COMPLETED, completedAtEpochMillis = time, updatedAtEpochMillis = time))
+        val state = currentState()
+        val affected = if (item.isGroup) {
+            val ids = GroupPolicy.descendantIds(item.id, state.items) + item.id
+            state.items.filter { it.id in ids && it.lifecycle == ItemLifecycle.ACTIVE }
+        } else {
+            listOf(item)
         }
-        reminderScheduler.cancel(id)
+        val originalsForCopy = if (item.isGroup) GroupPolicy.recurringTemplateItems(item, state.items) else listOf(item)
+        val nextItems = if (item.isGroup) {
+            RecurrencePolicy.buildNextGroupOccurrence(item, state.items, time, ::newId)
+        } else {
+            RecurrencePolicy.buildNextOccurrence(item, time, newId())?.let(::listOf).orEmpty()
+        }
+        val copiedIds = if (item.isGroup) {
+            GroupPolicy.recurringCopyIdMap(item, state.items, nextItems)
+        } else {
+            originalsForCopy.zip(nextItems).associate { (original, copy) -> original.id to copy.id }
+        }
+        val copiedRelations = OrderingPolicy.sanitizeRelations(
+            nextItems,
+            state.relations.filter {
+            it.fromItemId in copiedIds && it.toItemId in copiedIds
+            }.map {
+                it.copy(
+                    id = newId(),
+                    fromItemId = copiedIds.getValue(it.fromItemId),
+                    toItemId = copiedIds.getValue(it.toItemId),
+                    createdAtEpochMillis = time,
+                )
+            },
+        )
+        mutate("COMPLETE") {
+            affected.forEach { current ->
+                upsert(current.copy(lifecycle = ItemLifecycle.COMPLETED, completedAtEpochMillis = time, updatedAtEpochMillis = time))
+            }
+            nextItems.forEach { upsert(it) }
+            dao.upsertRelations(copiedRelations.map(ItemRelation::toEntity))
+        }
+        affected.forEach { reminderScheduler.cancel(it.id) }
+        nextItems.forEach { syncReminder(it) }
     }
 
     override suspend fun defer(id: String, threshold: Int): DeferDecision? {
         val state = currentState()
         val items = OrderingPolicy.canonicalSort(
-            state.items.filter { it.kind == ItemKind.TODO && it.lifecycle == ItemLifecycle.ACTIVE },
+            state.items.filter { it.kind == ItemKind.TODO && it.lifecycle == ItemLifecycle.ACTIVE && !it.isGroup },
             state.relations,
         )
         val index = items.indexOfFirst { it.id == id }
@@ -233,28 +464,45 @@ class RoomItemRepository(
 
     override suspend fun archiveMemo(id: String) {
         val memo = getItem(id) ?: return
+        if (memo.kind != ItemKind.MEMO) return
+        val state = currentState()
+        val affected = if (memo.isGroup) {
+            val ids = GroupPolicy.descendantIds(memo.id, state.items) + memo.id
+            state.items.filter { it.id in ids && it.lifecycle == ItemLifecycle.ACTIVE }
+        } else listOf(memo)
         val time = now()
         mutate("ARCHIVE_MEMO") {
-            upsert(memo.copy(lifecycle = ItemLifecycle.ARCHIVED, archivedAtEpochMillis = time, updatedAtEpochMillis = time))
+            affected.forEach { current ->
+                upsert(current.copy(lifecycle = ItemLifecycle.ARCHIVED, archivedAtEpochMillis = time, updatedAtEpochMillis = time))
+            }
         }
     }
 
     override suspend fun restore(id: String) {
         val item = getItem(id) ?: return
+        val state = currentState()
+        val restoring = if (item.isGroup) {
+            val ids = GroupPolicy.descendantIds(item.id, state.items) + item.id
+            state.items.filter { it.id in ids }
+        } else listOf(item)
         mutate("RESTORE") {
-            upsert(item.copy(
-                lifecycle = ItemLifecycle.ACTIVE,
-                completedAtEpochMillis = null,
-                archivedAtEpochMillis = null,
-                updatedAtEpochMillis = now(),
-            ))
+            val time = now()
+            restoring.forEach { current ->
+                upsert(current.copy(
+                    lifecycle = ItemLifecycle.ACTIVE,
+                    completedAtEpochMillis = null,
+                    archivedAtEpochMillis = null,
+                    updatedAtEpochMillis = time,
+                ))
+            }
         }
+        reconcileReminders(state.items, currentState().items)
     }
 
     override suspend fun validateMove(id: String, destinationIndex: Int): MoveDecision {
         val state = currentState()
         val items = OrderingPolicy.canonicalSort(
-            state.items.filter { it.kind == ItemKind.TODO && it.lifecycle == ItemLifecycle.ACTIVE },
+            state.items.filter { it.kind == ItemKind.TODO && it.lifecycle == ItemLifecycle.ACTIVE && !it.isGroup },
             state.relations,
         )
         return OrderingPolicy.validateMove(items, state.relations, id, destinationIndex)
@@ -275,8 +523,8 @@ class RoomItemRepository(
         val item = getItem(id) ?: return
         if (item.kind == ItemKind.TODO || item.lifecycle != ItemLifecycle.ACTIVE) return
         val group = currentState().items
-            .filter { it.kind == item.kind && it.lifecycle == ItemLifecycle.ACTIVE }
-            .sortedBy { it.manualRank }
+            .filter { it.kind == item.kind && it.lifecycle == ItemLifecycle.ACTIVE && it.groupId == item.groupId }
+            .sortedWith(compareBy<AppItem> { it.manualRank }.thenBy { it.createdAtEpochMillis }.thenBy { it.id })
         if (destinationIndex !in group.indices) return
         val moved = group.toMutableList().apply {
             val source = indexOfFirst { it.id == id }
@@ -293,6 +541,45 @@ class RoomItemRepository(
             else -> (destinationIndex + 1L) * 1_000L
         }
         mutate("MOVE") { upsert(item.copy(manualRank = rank, updatedAtEpochMillis = now())) }
+    }
+
+    override suspend fun moveWithinGroup(id: String, direction: Int): MoveDecision {
+        val state = currentState()
+        val item = state.items.firstOrNull { it.id == id } ?: return MoveDecision.Rejected(
+            jp.oboegaki.core.domain.MoveRejectionReason.INVALID_INDEX,
+            "項目が見つかりません",
+        )
+        val siblings = state.items.filter {
+            it.kind == item.kind && it.lifecycle == ItemLifecycle.ACTIVE && it.groupId == item.groupId
+        }.let { values ->
+            if (item.kind == ItemKind.TODO) OrderingPolicy.canonicalSort(values, state.relations)
+            else values.sortedWith(compareBy<AppItem> { it.manualRank }.thenBy { it.createdAtEpochMillis }.thenBy { it.id })
+        }
+        val sourceIndex = siblings.indexOfFirst { it.id == id }
+        val destinationIndex = sourceIndex + direction.coerceIn(-1, 1)
+        if (sourceIndex < 0 || destinationIndex !in siblings.indices) {
+            return MoveDecision.Rejected(
+                jp.oboegaki.core.domain.MoveRejectionReason.INVALID_INDEX,
+                "この方向には移動できません",
+            )
+        }
+        if (item.kind != ItemKind.TODO) {
+            val moved = siblings.toMutableList().apply {
+                add(destinationIndex, removeAt(sourceIndex))
+            }
+            val time = now()
+            mutate("MOVE") {
+                moved.forEachIndexed { index, sibling ->
+                    upsert(sibling.copy(manualRank = (index + 1L) * 1_000L, updatedAtEpochMillis = time))
+                }
+            }
+            return MoveDecision.Allowed(destinationIndex, (destinationIndex + 1L) * 1_000L)
+        }
+        val decision = OrderingPolicy.validateMove(siblings, state.relations, id, destinationIndex)
+        if (decision is MoveDecision.Allowed) {
+            mutate("MOVE") { upsert(item.copy(manualRank = decision.newRank, updatedAtEpochMillis = now())) }
+        }
+        return decision
     }
 
     override suspend fun split(id: String, titles: List<String>): SplitValidation {
@@ -339,14 +626,26 @@ class RoomItemRepository(
         val operation = dao.getUndoableOperation(time) ?: return false
         val snapshot = runCatching { json.decodeFromString<DataSnapshot>(operation.payloadJson) }.getOrNull()
             ?: return false
+        val current = currentState()
         database.inTransaction {
             dao.clearRelations()
             dao.clearTodoDetails()
             dao.clearItems()
             snapshot.items.forEach { upsert(it) }
             dao.upsertRelations(snapshot.relations.map(ItemRelation::toEntity))
+            snapshot.customThemes?.let { themes ->
+                dao.clearCustomThemes()
+                themes.forEach { theme ->
+                    val custom = theme.copy(builtIn = false)
+                    dao.upsertTheme(ThemeEntity(custom.id, custom.name, false, json.encodeToString(custom), time))
+                }
+            }
+            snapshot.settings?.let { settings ->
+                dao.upsertSetting(SettingEntity(SETTINGS_KEY, json.encodeToString(settings)))
+            }
             dao.markOperationReverted(operation.operationId, time)
         }
+        reconcileReminders(current.items, snapshot.items)
         return true
     }
 
@@ -386,10 +685,19 @@ class RoomItemRepository(
         val backup = runCatching { json.decodeFromString<BackupEnvelope>(value) }.getOrElse {
             return BackupImportResult(0, 0, "バックアップの形式を確認できません")
         }
-        if (backup.manifest.schemaVersion != 1) return BackupImportResult(0, 0, "未対応のバックアップ形式です")
-        val valid = backup.items.filter { it.title.isNotBlank() && it.title.length <= 200 && it.body.length <= 100_000 }
-        val ids = valid.map { it.id }.toSet()
-        val relations = backup.relations.filter { it.fromItemId in ids && it.toItemId in ids }
+        if (backup.manifest.schemaVersion !in 1..4) return BackupImportResult(0, 0, "未対応のバックアップ形式です")
+        val basicValid = backup.items.filter { it.title.isNotBlank() && it.title.length <= 200 && it.body.length <= 100_000 }
+        var valid = basicValid
+        valid = valid.map { item ->
+            val placement = GroupPolicy.validatePlacement(item, item.groupId, valid)
+            val recurrence = RecurrencePolicy.validate(item)
+            RecurrencePolicy.normalize(item.copy(
+                groupId = if (placement is GroupPlacementDecision.Rejected) null else item.groupId,
+                todo = if (recurrence is RecurrenceValidation.Invalid) item.todo?.copy(recurrence = null) else item.todo,
+            ))
+        }
+        val relations = OrderingPolicy.sanitizeRelations(valid, backup.relations)
+        val correctedRelations = backup.relations.size - relations.size
         val safeThemes = backup.themes.filter { ThemePolicy.validate(it) is ThemeValidation.Valid }
         val before = currentState()
         val time = now()
@@ -407,8 +715,15 @@ class RoomItemRepository(
             }
             dao.upsertSetting(SettingEntity(SETTINGS_KEY, json.encodeToString(backup.settings)))
         }
-        reminderScheduler.reconcileAll(valid.mapNotNull(::toReminder))
-        return BackupImportResult(valid.size, backup.items.size - valid.size, "${valid.size}件を読み込みました")
+        reconcileReminders(before.items, valid)
+        val correctionMessage = if (correctedRelations > 0) "（前後関係${correctedRelations}件を修正）" else ""
+        return BackupImportResult(
+            valid.size,
+            backup.items.size - valid.size,
+            "${valid.size}件を読み込みました$correctionMessage",
+            correctedRelations,
+            successful = true,
+        )
     }
 
     private suspend fun mutate(type: String, block: suspend RoomItemRepository.() -> Unit) {
@@ -430,6 +745,12 @@ class RoomItemRepository(
         return DataSnapshot(
             items = dao.getItems().map { it.toModel(details[it.id]) },
             relations = dao.getRelations().map(ItemRelationEntity::toModel),
+            customThemes = dao.getThemes().mapNotNull { row ->
+                runCatching { json.decodeFromString<ThemeDefinition>(row.json) }.getOrNull()
+            },
+            settings = dao.getSetting(SETTINGS_KEY)?.let { row ->
+                runCatching { json.decodeFromString<AppSettings>(row.value) }.getOrNull()
+            } ?: AppSettings(),
         )
     }
 
@@ -454,8 +775,42 @@ class RoomItemRepository(
 
     private fun toReminder(item: AppItem): Reminder? {
         val scheduled = item.todo?.scheduledAtEpochMillis ?: return null
-        if (item.kind != ItemKind.TODO || item.lifecycle != ItemLifecycle.ACTIVE || scheduled <= now()) return null
+        if (item.kind != ItemKind.TODO || item.isGroup || item.lifecycle != ItemLifecycle.ACTIVE || scheduled <= now()) return null
         return Reminder(item.id, item.title, scheduled)
+    }
+
+    private fun validPrerequisites(
+        prerequisiteIds: Set<String>,
+        item: AppItem,
+        items: List<AppItem>,
+        allowCurrent: Boolean = false,
+    ): Boolean {
+        if (item.kind != ItemKind.TODO && prerequisiteIds.isNotEmpty()) return false
+        val activeTodoIds = items.asSequence()
+            .filter { it.kind == ItemKind.TODO && it.lifecycle == ItemLifecycle.ACTIVE }
+            .map { it.id }
+            .toSet()
+        return prerequisiteIds.all { it in activeTodoIds && (allowCurrent || it != item.id) }
+    }
+
+    private suspend fun insertPrerequisites(itemId: String, prerequisiteIds: Set<String>, time: Long) {
+        prerequisiteIds.forEach { prerequisiteId ->
+            dao.upsertRelation(ItemRelation(
+                id = newId(),
+                fromItemId = prerequisiteId,
+                toItemId = itemId,
+                type = RelationType.REQUIRED_BEFORE,
+                createdAtEpochMillis = time,
+            ).toEntity())
+        }
+    }
+
+    private suspend fun reconcileReminders(previous: List<AppItem>, restored: List<AppItem>) {
+        val staleIds = previous.asSequence()
+            .filter { it.kind == ItemKind.TODO && !it.isGroup && it.todo?.scheduledAtEpochMillis != null }
+            .map { it.id }
+            .toSet()
+        reminderScheduler.reconcileAll(restored.mapNotNull(::toReminder), staleIds)
     }
 
     private companion object { const val SETTINGS_KEY = "app_settings" }

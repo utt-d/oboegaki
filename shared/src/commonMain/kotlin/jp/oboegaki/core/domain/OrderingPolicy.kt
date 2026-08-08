@@ -1,7 +1,9 @@
 package jp.oboegaki.core.domain
 
 import jp.oboegaki.core.model.AppItem
+import jp.oboegaki.core.model.ItemKind
 import jp.oboegaki.core.model.ItemRelation
+import jp.oboegaki.core.model.ItemLifecycle
 import jp.oboegaki.core.model.Priority
 import jp.oboegaki.core.model.RelationType
 
@@ -11,6 +13,24 @@ enum class MoveRejectionReason {
     PREREQUISITE_CONFLICT,
     DIFFERENT_SECTION,
     INVALID_INDEX,
+}
+
+enum class PrerequisiteRejectionReason {
+    CYCLE,
+    DANGLING_ENDPOINT,
+    INACTIVE_ENDPOINT,
+    NON_TODO_ENDPOINT,
+    DIFFERENT_GROUP,
+    SCHEDULE_CONFLICT,
+    PRIORITY_CONFLICT,
+}
+
+sealed interface PrerequisiteValidation {
+    data object Valid : PrerequisiteValidation
+    data class Invalid(
+        val reason: PrerequisiteRejectionReason,
+        val message: String,
+    ) : PrerequisiteValidation
 }
 
 sealed interface MoveDecision {
@@ -30,7 +50,11 @@ object OrderingPolicy {
                 .thenBy { it.manualRank },
         ).toMutableList()
 
-        val required = relations.filter { it.type == RelationType.REQUIRED_BEFORE }
+        // Relations are user data and older databases may contain edges that
+        // predate the immutable time/priority rules. Keep those edges from
+        // changing the canonical order.
+        val required = sanitizeRelations(items, relations)
+            .filter { it.type == RelationType.REQUIRED_BEFORE }
         repeat(base.size.coerceAtLeast(1)) {
             var changed = false
             required.forEach { relation ->
@@ -79,7 +103,7 @@ object OrderingPolicy {
             add(destinationIndex.coerceAtMost(size), value)
         }
         val position = moved.mapIndexed { index, item -> item.id to index }.toMap()
-        val violatesPrerequisite = relations.any {
+        val violatesPrerequisite = sanitizeRelations(items, relations).any {
             it.type == RelationType.REQUIRED_BEFORE &&
                 position[it.fromItemId] != null && position[it.toItemId] != null &&
                 position.getValue(it.fromItemId) >= position.getValue(it.toItemId)
@@ -122,5 +146,155 @@ object OrderingPolicy {
         }
         return false
     }
-}
 
+    /**
+     * Validates the complete relation set after replacing the target item's
+     * required-before inputs with [prerequisiteIds]. This is the single core
+     * rule used by repository create and update operations.
+     */
+    fun validateProposedPrerequisites(
+        items: List<AppItem>,
+        relations: List<ItemRelation>,
+        target: AppItem,
+        prerequisiteIds: Set<String>,
+    ): PrerequisiteValidation {
+        val prospectiveItems = items.filterNot { it.id == target.id } + target
+        val proposedRelations = relations
+            .filterNot { it.toItemId == target.id && it.type == RelationType.REQUIRED_BEFORE }
+            .plus(
+                prerequisiteIds.sorted().mapIndexed { index, prerequisiteId ->
+                    ItemRelation(
+                        id = "__proposed__$index:$prerequisiteId",
+                        fromItemId = prerequisiteId,
+                        toItemId = target.id,
+                        type = RelationType.REQUIRED_BEFORE,
+                        createdAtEpochMillis = Long.MIN_VALUE + index,
+                    )
+                },
+            )
+
+        val byId = prospectiveItems.associateBy { it.id }
+        proposedRelations.forEach { relation ->
+            val from = byId[relation.fromItemId]
+                ?: return PrerequisiteValidation.Invalid(
+                    PrerequisiteRejectionReason.DANGLING_ENDPOINT,
+                    "前提関係のやることが見つかりません",
+                )
+            val to = byId[relation.toItemId]
+                ?: return PrerequisiteValidation.Invalid(
+                    PrerequisiteRejectionReason.DANGLING_ENDPOINT,
+                    "前提関係のやることが見つかりません",
+                )
+            if (from.lifecycle != ItemLifecycle.ACTIVE || to.lifecycle != ItemLifecycle.ACTIVE) {
+                return PrerequisiteValidation.Invalid(
+                    PrerequisiteRejectionReason.INACTIVE_ENDPOINT,
+                    "前提関係には有効なやることだけ指定できます",
+                )
+            }
+            if (from.kind != ItemKind.TODO || to.kind != ItemKind.TODO) {
+                return PrerequisiteValidation.Invalid(
+                    PrerequisiteRejectionReason.NON_TODO_ENDPOINT,
+                    "前提関係にはやることだけ指定できます",
+                )
+            }
+            if (from.groupId != to.groupId) {
+                return PrerequisiteValidation.Invalid(
+                    PrerequisiteRejectionReason.DIFFERENT_GROUP,
+                    "前提関係は同じグループ内のやることに指定してください",
+                )
+            }
+        }
+
+        val acceptedRequired = mutableListOf<ItemRelation>()
+        proposedRelations
+            .filter { it.type == RelationType.REQUIRED_BEFORE }
+            .distinctBy { it.id }
+            .sortedWith(compareBy<ItemRelation> { it.id }.thenBy { it.createdAtEpochMillis })
+            .forEach { relation ->
+                if (wouldCreateCycle(acceptedRequired, relation.fromItemId, relation.toItemId)) {
+                    return PrerequisiteValidation.Invalid(
+                        PrerequisiteRejectionReason.CYCLE,
+                        "前提関係が循環するため保存できません",
+                    )
+                }
+                when (immutableConflict(prospectiveItems, relation)) {
+                    PrerequisiteRejectionReason.SCHEDULE_CONFLICT -> {
+                        return PrerequisiteValidation.Invalid(
+                            PrerequisiteRejectionReason.SCHEDULE_CONFLICT,
+                            "前提関係が予定時刻の順序と矛盾します",
+                        )
+                    }
+                    PrerequisiteRejectionReason.PRIORITY_CONFLICT -> {
+                        return PrerequisiteValidation.Invalid(
+                            PrerequisiteRejectionReason.PRIORITY_CONFLICT,
+                            "前提関係が優先度の順序と矛盾します",
+                        )
+                    }
+                    else -> Unit
+                }
+                acceptedRequired += relation
+            }
+        return PrerequisiteValidation.Valid
+    }
+
+    /** Removes both incoming and outgoing relations when an item stops being a TODO. */
+    fun relationsAfterKindChange(
+        itemId: String,
+        newKind: ItemKind,
+        relations: List<ItemRelation>,
+    ): List<ItemRelation> = if (newKind == ItemKind.TODO) {
+        relations
+    } else {
+        relations.filterNot { it.fromItemId == itemId || it.toItemId == itemId }
+    }
+
+    /** Keeps only deterministic, non-dangling relations accepted by the domain. */
+    fun sanitizeRelations(items: List<AppItem>, relations: List<ItemRelation>): List<ItemRelation> {
+        val byId = items.associateBy { it.id }
+        val accepted = mutableListOf<ItemRelation>()
+        relations
+            .distinctBy { it.id }
+            .sortedWith(compareBy<ItemRelation> { it.id }.thenBy { it.createdAtEpochMillis })
+            .forEach { relation ->
+                val from = byId[relation.fromItemId] ?: return@forEach
+                val to = byId[relation.toItemId] ?: return@forEach
+                if (from.id == to.id ||
+                    from.kind != ItemKind.TODO || to.kind != ItemKind.TODO ||
+                    from.lifecycle != ItemLifecycle.ACTIVE || to.lifecycle != ItemLifecycle.ACTIVE ||
+                    from.groupId != to.groupId
+                ) return@forEach
+                if (relation.type == RelationType.REQUIRED_BEFORE) {
+                    if (immutableConflict(items, relation) != null ||
+                        wouldCreateCycle(accepted, relation.fromItemId, relation.toItemId)
+                    ) return@forEach
+                }
+                accepted += relation
+            }
+        return accepted
+    }
+
+    private fun immutableConflict(
+        items: List<AppItem>,
+        relation: ItemRelation,
+    ): PrerequisiteRejectionReason? {
+        val byId = items.associateBy { it.id }
+        val from = byId[relation.fromItemId] ?: return PrerequisiteRejectionReason.DANGLING_ENDPOINT
+        val to = byId[relation.toItemId] ?: return PrerequisiteRejectionReason.DANGLING_ENDPOINT
+        val fromScheduled = from.todo?.scheduledAtEpochMillis
+        val toScheduled = to.todo?.scheduledAtEpochMillis
+        if (fromScheduled == null && toScheduled != null) {
+            return PrerequisiteRejectionReason.SCHEDULE_CONFLICT
+        }
+        if (fromScheduled != null && toScheduled != null && fromScheduled > toScheduled) {
+            return PrerequisiteRejectionReason.SCHEDULE_CONFLICT
+        }
+        val sameScheduleGroup = fromScheduled == toScheduled
+        if (sameScheduleGroup &&
+            (from.todo?.priority?.weight ?: Priority.NONE.weight) <
+            (to.todo?.priority?.weight ?: Priority.NONE.weight)
+        ) {
+            return PrerequisiteRejectionReason.PRIORITY_CONFLICT
+        }
+        return null
+    }
+}
