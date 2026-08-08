@@ -406,10 +406,21 @@ class RoomItemRepository(
     override suspend fun delete(id: String) = mutationMutex.withLock {
         val item = getItem(id) ?: return@withLock
         val time = now()
-        val children = if (item.isGroup) currentState().items.filter { it.groupId == item.id } else emptyList()
+        val state = currentState()
+        val children = if (item.isGroup) state.items.filter { it.groupId == item.id } else emptyList()
+        val afterDelete = state.items.map { current ->
+            when {
+                current.id == item.id -> current.copy(lifecycle = ItemLifecycle.DELETED, updatedAtEpochMillis = time)
+                current.id in children.map { it.id } -> current.copy(groupId = item.groupId, updatedAtEpochMillis = time)
+                else -> current
+            }
+        }
+        val safeRelations = OrderingPolicy.sanitizeRelations(afterDelete, state.relations)
         mutateLocked("DELETE") {
             children.forEach { upsert(it.copy(groupId = item.groupId, updatedAtEpochMillis = time)) }
             upsert(item.copy(lifecycle = ItemLifecycle.DELETED, updatedAtEpochMillis = time))
+            dao.clearRelations()
+            dao.upsertRelations(safeRelations.map(ItemRelation::toEntity))
         }
         reminderScheduler.cancel(id)
     }
@@ -441,18 +452,28 @@ class RoomItemRepository(
         } else {
             originalsForCopy.zip(nextItems).associate { (original, copy) -> original.id to copy.id }
         }
-        val copiedRelations = OrderingPolicy.sanitizeRelations(
-            nextItems,
-            state.relations.filter {
+        val affectedIds = affected.map { it.id }.toSet()
+        val copiedRelations = state.relations.filter {
             it.fromItemId in copiedIds && it.toItemId in copiedIds
-            }.map {
-                it.copy(
-                    id = newId(),
-                    fromItemId = copiedIds.getValue(it.fromItemId),
-                    toItemId = copiedIds.getValue(it.toItemId),
-                    createdAtEpochMillis = time,
-                )
-            },
+        }.map {
+            it.copy(
+                id = newId(),
+                fromItemId = copiedIds.getValue(it.fromItemId),
+                toItemId = copiedIds.getValue(it.toItemId),
+                createdAtEpochMillis = time,
+            )
+        }
+        val completedItems = state.items.map { current ->
+            if (current.id in affectedIds) current.copy(
+                lifecycle = ItemLifecycle.COMPLETED,
+                completedAtEpochMillis = time,
+                updatedAtEpochMillis = time,
+                revision = current.revision + 1,
+            ) else current
+        }
+        val safeRelations = OrderingPolicy.sanitizeRelations(
+            completedItems + nextItems,
+            state.relations + copiedRelations,
         )
         val operationId = mutateLocked(operationType) {
             affected.forEach { current ->
@@ -464,7 +485,8 @@ class RoomItemRepository(
                 ))
             }
             nextItems.forEach { upsert(it) }
-            dao.upsertRelations(copiedRelations.map(ItemRelation::toEntity))
+            dao.clearRelations()
+            dao.upsertRelations(safeRelations.map(ItemRelation::toEntity))
         }
         affected.forEach { reminderScheduler.cancel(it.id) }
         nextItems.forEach { syncReminder(it) }
@@ -535,24 +557,49 @@ class RoomItemRepository(
     }
 
     override suspend fun restore(id: String) = mutationMutex.withLock {
-        val item = getItem(id) ?: return@withLock
+        // currentState() intentionally excludes DELETED rows. Read the target
+        // directly so a deleted leaf can be restored without searching a
+        // filtered state snapshot.
+        val item = dao.getItem(id)?.toModel(dao.getTodoDetail(id)) ?: return@withLock
         val state = currentState()
-        val restoring = if (item.isGroup) {
+        val restoringIds = if (item.isGroup) {
             val ids = GroupPolicy.descendantIds(item.id, state.items) + item.id
-            state.items.filter { it.id in ids }
-        } else listOf(item)
-        mutateLocked("RESTORE") {
-            val time = now()
-            restoring.forEach { current ->
-                upsert(current.copy(
-                    lifecycle = ItemLifecycle.ACTIVE,
-                    completedAtEpochMillis = null,
-                    archivedAtEpochMillis = null,
-                    updatedAtEpochMillis = time,
-                ))
-            }
+            ids
+        } else setOf(item.id)
+        // A deleted group has already reparented its direct children during
+        // delete. If the group is absent from currentState, restoring the
+        // group itself therefore preserves that explicit reparenting policy.
+        val restoring = (state.items.filter { it.id in restoringIds } + item)
+            .distinctBy { it.id }
+        val time = now()
+        val restorationCandidates = restoring.map { current ->
+            current.copy(
+                lifecycle = ItemLifecycle.ACTIVE,
+                completedAtEpochMillis = null,
+                archivedAtEpochMillis = null,
+                updatedAtEpochMillis = time,
+            )
         }
-        reconcileReminders(state.items, currentState().items)
+        val restoreContext = state.items.filterNot { it.id in restoringIds } + restorationCandidates
+        val restoredItems = (state.items.map { current ->
+            restorationCandidates.firstOrNull { it.id == current.id } ?: current
+        } + restorationCandidates.filter { candidate ->
+            state.items.none { it.id == candidate.id }
+        }).map { candidate ->
+            if (candidate.groupId != null &&
+                GroupPolicy.validatePlacement(candidate, candidate.groupId, restoreContext) !is GroupPlacementDecision.Allowed
+            ) candidate.copy(groupId = null) else candidate
+        }
+        val restoredById = restoredItems.associateBy { it.id }
+        val safeRelations = OrderingPolicy.sanitizeRelations(restoredItems, state.relations)
+        mutateLocked("RESTORE") {
+            restorationCandidates.forEach { candidate ->
+                upsert(restoredById.getValue(candidate.id))
+            }
+            dao.clearRelations()
+            dao.upsertRelations(safeRelations.map(ItemRelation::toEntity))
+        }
+        reconcileReminders(state.items, restoredItems)
     }
 
     override suspend fun validateMove(id: String, destinationIndex: Int): MoveDecision {
@@ -656,11 +703,15 @@ class RoomItemRepository(
                 createdAtEpochMillis = time,
             )
         }
+        val safeRewired = OrderingPolicy.sanitizeRelations(
+            listOf(parent.copy(lifecycle = ItemLifecycle.SPLIT)) + children,
+            rewired,
+        )
         mutateLocked("SPLIT") {
             upsert(parent.copy(lifecycle = ItemLifecycle.SPLIT, updatedAtEpochMillis = time))
             children.forEach { upsert(it) }
             dao.deleteRelationsForItem(parent.id)
-            dao.upsertRelations(rewired.map(ItemRelation::toEntity))
+            dao.upsertRelations(safeRewired.map(ItemRelation::toEntity))
         }
         reminderScheduler.cancel(id)
         children.forEach { syncReminder(it) }
@@ -918,11 +969,17 @@ class RoomItemRepository(
         time: Long,
         restoreSettingsAndThemes: Boolean,
     ) {
+        val safeItems = snapshot.items.map { item ->
+            if (item.groupId != null &&
+                GroupPolicy.validatePlacement(item, item.groupId, snapshot.items) !is GroupPlacementDecision.Allowed
+            ) item.copy(groupId = null) else item
+        }
+        val safeRelations = OrderingPolicy.sanitizeRelations(safeItems, snapshot.relations)
         dao.clearRelations()
         dao.clearTodoDetails()
         dao.clearItems()
-        snapshot.items.forEach { upsert(it) }
-        dao.upsertRelations(snapshot.relations.map(ItemRelation::toEntity))
+        safeItems.forEach { upsert(it) }
+        dao.upsertRelations(safeRelations.map(ItemRelation::toEntity))
         if (restoreSettingsAndThemes) snapshot.customThemes?.let { themes ->
             dao.clearCustomThemes()
             themes.forEach { theme ->

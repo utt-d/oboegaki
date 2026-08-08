@@ -3,12 +3,17 @@
 package jp.oboegaki.platform
 
 import kotlinx.coroutines.suspendCancellableCoroutine
+import jp.oboegaki.core.model.CalendarRecurrenceFrequency
 import platform.EventKit.EKEntityType
 import platform.EventKit.EKEvent
 import platform.EventKit.EKEventStore
+import platform.EventKit.EKRecurrenceEnd
+import platform.EventKit.EKRecurrenceFrequency
+import platform.EventKit.EKRecurrenceRule
 import platform.EventKit.EKSpan
 import platform.Foundation.NSError
 import platform.Foundation.NSDate
+import platform.Foundation.NSNumber
 import platform.UIKit.UIDevice
 import kotlin.coroutines.resume
 
@@ -50,6 +55,55 @@ class IosCalendarExporter : CalendarExporter {
                 timeIntervalSinceReferenceDate = draft.endAtEpochMillis / 1_000.0 - APPLE_REFERENCE_DATE_OFFSET_SECONDS,
             )
             event.calendar = calendar
+            draft.recurrence?.let { recurrence ->
+                val frequency = when (recurrence.frequency) {
+                    CalendarRecurrenceFrequency.DAILY -> EKRecurrenceFrequency.EKRecurrenceFrequencyDaily
+                    CalendarRecurrenceFrequency.WEEKLY -> EKRecurrenceFrequency.EKRecurrenceFrequencyWeekly
+                    CalendarRecurrenceFrequency.MONTHLY -> EKRecurrenceFrequency.EKRecurrenceFrequencyMonthly
+                    CalendarRecurrenceFrequency.YEARLY -> EKRecurrenceFrequency.EKRecurrenceFrequencyYearly
+                }
+                val end = recurrence.endAtEpochMillis?.let {
+                    EKRecurrenceEnd.recurrenceEndWithEndDate(
+                        NSDate(
+                            timeIntervalSinceReferenceDate = it / 1_000.0 - APPLE_REFERENCE_DATE_OFFSET_SECONDS,
+                        ),
+                    )
+                }
+                val recurrenceRule = when (recurrence.frequency) {
+                    CalendarRecurrenceFrequency.MONTHLY -> EKRecurrenceRule(
+                        recurrenceWithFrequency = frequency,
+                        interval = recurrence.interval.toLong(),
+                        daysOfTheWeek = null,
+                        daysOfTheMonth = listOf(
+                            NSNumber(int = if (recurrence.lastDayOfMonth) -1 else recurrence.dayOfMonth ?: 1),
+                        ),
+                        monthsOfTheYear = null,
+                        weeksOfTheYear = null,
+                        daysOfTheYear = null,
+                        setPositions = null,
+                        end = end,
+                    )
+                    CalendarRecurrenceFrequency.YEARLY -> EKRecurrenceRule(
+                        recurrenceWithFrequency = frequency,
+                        interval = recurrence.interval.toLong(),
+                        daysOfTheWeek = null,
+                        daysOfTheMonth = listOf(NSNumber(int = recurrence.dayOfMonth ?: 1)),
+                        monthsOfTheYear = listOf(NSNumber(int = recurrence.monthOfYear ?: 1)),
+                        weeksOfTheYear = null,
+                        daysOfTheYear = null,
+                        setPositions = null,
+                        end = end,
+                    )
+                    CalendarRecurrenceFrequency.DAILY,
+                    CalendarRecurrenceFrequency.WEEKLY,
+                    -> EKRecurrenceRule(
+                        recurrenceWithFrequency = frequency,
+                        interval = recurrence.interval.toLong(),
+                        end = end,
+                    )
+                }
+                event.addRecurrenceRule(recurrenceRule)
+            }
             val saved = eventStore.saveEvent(event, EKSpan.EKSpanThisEvent, commit = true, error = null)
             if (saved) CalendarExportResult.Added(calendar.title)
             else CalendarExportResult.Failed("カレンダーに追加できませんでした")

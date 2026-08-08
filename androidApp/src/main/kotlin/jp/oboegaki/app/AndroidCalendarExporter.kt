@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.provider.CalendarContract
+import jp.oboegaki.core.domain.CalendarRecurrencePolicy
 import jp.oboegaki.platform.CalendarEventDraft
 import jp.oboegaki.platform.CalendarExportResult
 import jp.oboegaki.platform.CalendarExporter
@@ -16,6 +17,17 @@ class AndroidCalendarExporter(private val activity: Activity) : CalendarExporter
             putExtra(CalendarContract.Events.DESCRIPTION, event.notes)
             putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, event.startAtEpochMillis)
             putExtra(CalendarContract.EXTRA_EVENT_END_TIME, event.endAtEpochMillis)
+            putExtra(CalendarContract.Events.EVENT_TIMEZONE, event.timeZoneId)
+            event.recurrence?.let { recurrence ->
+                putExtra(
+                    CalendarContract.Events.RRULE,
+                    CalendarRecurrencePolicy.toRRule(
+                        recurrence,
+                        event.startAtEpochMillis,
+                        event.timeZoneId,
+                    ),
+                )
+            }
         }
         return try {
             activity.startActivity(Intent.createChooser(insertIntent, "追加先のカレンダーを選ぶ"))

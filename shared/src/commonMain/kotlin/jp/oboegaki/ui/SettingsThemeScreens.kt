@@ -48,6 +48,13 @@ import jp.oboegaki.core.model.MotionStrength
 import jp.oboegaki.core.model.ThemeColors
 import jp.oboegaki.core.model.ThemeDefinition
 import jp.oboegaki.core.model.TopActionButton
+import jp.oboegaki.platform.NotificationState
+import jp.oboegaki.platform.NotificationTestResult
+import jp.oboegaki.platform.currentNotificationStatus
+import jp.oboegaki.platform.notificationSettingsEvents
+import jp.oboegaki.platform.openNotificationSettings
+import jp.oboegaki.platform.tryTestNotification
+import androidx.compose.runtime.LaunchedEffect
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlin.math.roundToInt
@@ -85,6 +92,60 @@ fun SettingsScreen(settings: AppSettings, controller: AppController) {
                     style = MaterialTheme.typography.caption,
                     color = parseColor(LocalThemeColors.current.textSecondary),
                 )
+            }
+            item {
+                var status by remember { mutableStateOf(currentNotificationStatus()) }
+                var testMessage by remember { mutableStateOf<String?>(null) }
+                LaunchedEffect(Unit) {
+                    notificationSettingsEvents().collect {
+                        status = currentNotificationStatus()
+                    }
+                }
+                Text("通知の状態", style = MaterialTheme.typography.subtitle1)
+                Text(
+                    when (status.state) {
+                        NotificationState.ENABLED -> "通知は有効です"
+                        NotificationState.POST_NOTIFICATIONS_REQUIRED -> "通知の許可が必要です（Android 13以降）"
+                        NotificationState.APP_NOTIFICATIONS_DISABLED -> "アプリの通知が端末設定で無効です"
+                        NotificationState.CHANNEL_DISABLED -> "やることの通知チャンネルが端末設定で無効です"
+                        NotificationState.CHANNEL_NOT_READY -> "やることの通知チャンネルを準備しています"
+                        NotificationState.PLATFORM_MANAGED -> "通知の状態は端末の設定で管理されています"
+                    },
+                    color = if (status.state == NotificationState.ENABLED) {
+                        parseColor(LocalThemeColors.current.success)
+                    } else {
+                        parseColor(LocalThemeColors.current.textSecondary)
+                    },
+                )
+                testMessage?.let {
+                    Text(it, style = MaterialTheme.typography.caption, color = parseColor(LocalThemeColors.current.textSecondary))
+                }
+                if (status.state != NotificationState.PLATFORM_MANAGED) {
+                    OutlinedButton(
+                        onClick = {
+                            val result = tryTestNotification()
+                            status = currentNotificationStatus()
+                            testMessage = when (result) {
+                                NotificationTestResult.Sent -> "実際の通知チャンネルへ試しに通知しました"
+                                NotificationTestResult.PermissionRequired -> "通知を許可すると試せます"
+                                NotificationTestResult.AppNotificationsDisabled -> "アプリの通知を端末設定で有効にしてください"
+                                NotificationTestResult.ChannelDisabled -> "通知チャンネルを端末設定で有効にしてください"
+                                NotificationTestResult.ChannelNotReady -> "やることの通知チャンネルを準備しています"
+                                NotificationTestResult.PlatformManaged -> "通知の状態は端末の設定で確認してください"
+                                is NotificationTestResult.Failed -> result.reason
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                    ) { Text("通知を試す") }
+                }
+                OutlinedButton(
+                    onClick = {
+                        openNotificationSettings()
+                        status = currentNotificationStatus()
+                    },
+                    enabled = status.state != NotificationState.PLATFORM_MANAGED,
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                ) { Text("端末の通知設定を開く") }
             }
             item { SectionTitle("ボタン配置") }
             item {

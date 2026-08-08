@@ -121,6 +121,57 @@ class OrderingPolicyTest {
     }
 
     @Test
+    fun proposedPrerequisiteRejectsGroupEndpoint() {
+        val group = todo("group", 1).copy(isGroup = true)
+        val target = todo("target", 2)
+        val result = OrderingPolicy.validateProposedPrerequisites(
+            listOf(group, target),
+            emptyList(),
+            target,
+            setOf(group.id),
+        )
+
+        assertIs<PrerequisiteValidation.Invalid>(result)
+        assertEquals(PrerequisiteRejectionReason.GROUP_ENDPOINT, result.reason)
+    }
+
+    @Test
+    fun sanitizeRelationsKeepsOnlyActiveLeavesInTheSameDirectParent() {
+        val group = todo("group", 0).copy(isGroup = true)
+        val first = todo("first", 1).copy(groupId = group.id)
+        val second = todo("second", 2).copy(groupId = group.id)
+        val otherGroup = todo("other-group", 3).copy(isGroup = true)
+        val other = todo("other", 4).copy(groupId = otherGroup.id)
+        val relations = listOf(
+            ItemRelation("valid", first.id, second.id, RelationType.REQUIRED_BEFORE, 0),
+            ItemRelation("group", group.id, second.id, RelationType.REQUIRED_BEFORE, 1),
+            ItemRelation("cross", first.id, other.id, RelationType.REQUIRED_BEFORE, 2),
+        )
+
+        assertEquals(listOf("valid"), OrderingPolicy.sanitizeRelations(
+            listOf(group, first, second, otherGroup, other),
+            relations,
+        ).map { it.id })
+    }
+
+    @Test
+    fun prerequisiteCandidatesAreActiveLeavesOfTheSameDirectParent() {
+        val group = todo("group", 0).copy(isGroup = true)
+        val valid = todo("valid", 1).copy(groupId = group.id)
+        val completed = todo("completed", 2).copy(groupId = group.id, lifecycle = ItemLifecycle.COMPLETED)
+        val nestedGroup = todo("nested", 3).copy(groupId = group.id, isGroup = true)
+        val nestedLeaf = todo("nested-leaf", 4).copy(groupId = nestedGroup.id)
+
+        assertEquals(
+            listOf(valid.id),
+            OrderingPolicy.prerequisiteCandidates(
+                listOf(group, valid, completed, nestedGroup, nestedLeaf),
+                group.id,
+            ).map { it.id },
+        )
+    }
+
+    @Test
     fun proposedPrerequisiteRejectsDifferentGroupBranch() {
         val from = todo("from", 1).copy(groupId = "group-a")
         val target = todo("target", 2).copy(groupId = "group-b")
@@ -143,6 +194,30 @@ class OrderingPolicyTest {
         val relation = ItemRelation("cross", from.id, target.id, RelationType.REQUIRED_BEFORE, 0)
 
         assertTrue(OrderingPolicy.sanitizeRelations(listOf(from, target), listOf(relation)).isEmpty())
+    }
+
+    @Test
+    fun sanitizeRelationsRejectsMissingInactiveAndWrongKindParents() {
+        val missingFrom = todo("missing-from", 1).copy(groupId = "missing")
+        val missingTarget = todo("missing-target", 2).copy(groupId = "missing")
+        val inactiveParent = todo("inactive-parent", 0).copy(isGroup = true, lifecycle = ItemLifecycle.COMPLETED)
+        val inactiveFrom = todo("inactive-from", 1).copy(groupId = inactiveParent.id)
+        val inactiveTarget = todo("inactive-target", 2).copy(groupId = inactiveParent.id)
+        val nonGroupParent = todo("non-group-parent", 0)
+        val nonGroupFrom = todo("non-group-from", 1).copy(groupId = nonGroupParent.id)
+        val nonGroupTarget = todo("non-group-target", 2).copy(groupId = nonGroupParent.id)
+        val relations = listOf(
+            ItemRelation("missing", missingFrom.id, missingTarget.id, RelationType.REQUIRED_BEFORE, 0),
+            ItemRelation("inactive", inactiveFrom.id, inactiveTarget.id, RelationType.REQUIRED_BEFORE, 1),
+            ItemRelation("non-group", nonGroupFrom.id, nonGroupTarget.id, RelationType.REQUIRED_BEFORE, 2),
+        )
+
+        assertTrue(
+            OrderingPolicy.sanitizeRelations(
+                listOf(missingFrom, missingTarget, inactiveParent, inactiveFrom, inactiveTarget, nonGroupParent, nonGroupFrom, nonGroupTarget),
+                relations,
+            ).isEmpty(),
+        )
     }
 
     @Test
@@ -218,6 +293,79 @@ class OrderingPolicyTest {
         )
 
         assertIs<PrerequisiteValidation.Valid>(result)
+    }
+
+    @Test
+    fun proposedPrerequisiteAcceptsTwoRootLeaves() {
+        val from = todo("from", 1)
+        val target = todo("target", 2)
+
+        assertIs<PrerequisiteValidation.Valid>(
+            OrderingPolicy.validateProposedPrerequisites(
+                listOf(from, target), emptyList(), target, setOf(from.id),
+            ),
+        )
+    }
+
+    @Test
+    fun proposedPrerequisiteAcceptsLeavesWithTheSameActiveParent() {
+        val parent = todo("parent", 0).copy(isGroup = true)
+        val from = todo("from", 1).copy(groupId = parent.id)
+        val target = todo("target", 2).copy(groupId = parent.id)
+
+        assertIs<PrerequisiteValidation.Valid>(
+            OrderingPolicy.validateProposedPrerequisites(
+                listOf(parent, from, target), emptyList(), target, setOf(from.id),
+            ),
+        )
+    }
+
+    @Test
+    fun proposedPrerequisiteRejectsMissingParent() {
+        val from = todo("from", 1).copy(groupId = "missing")
+        val target = todo("target", 2).copy(groupId = "missing")
+
+        val result = OrderingPolicy.validateProposedPrerequisites(
+            listOf(from, target), emptyList(), target, setOf(from.id),
+        )
+
+        assertIs<PrerequisiteValidation.Invalid>(result)
+        assertEquals(PrerequisiteRejectionReason.INVALID_PARENT, result.reason)
+    }
+
+    @Test
+    fun proposedPrerequisiteRejectsInactiveParent() {
+        val parent = todo("parent", 0).copy(isGroup = true, lifecycle = ItemLifecycle.COMPLETED)
+        val from = todo("from", 1).copy(groupId = parent.id)
+        val target = todo("target", 2).copy(groupId = parent.id)
+
+        val result = OrderingPolicy.validateProposedPrerequisites(
+            listOf(parent, from, target), emptyList(), target, setOf(from.id),
+        )
+
+        assertIs<PrerequisiteValidation.Invalid>(result)
+        assertEquals(PrerequisiteRejectionReason.INVALID_PARENT, result.reason)
+    }
+
+    @Test
+    fun proposedPrerequisiteRejectsWrongKindOrNonGroupParent() {
+        val wrongKindParent = todo("memo-parent", 0).copy(kind = ItemKind.MEMO, todo = null, isGroup = true)
+        val from = todo("from", 1).copy(groupId = wrongKindParent.id)
+        val target = todo("target", 2).copy(groupId = wrongKindParent.id)
+        val wrongKind = OrderingPolicy.validateProposedPrerequisites(
+            listOf(wrongKindParent, from, target), emptyList(), target, setOf(from.id),
+        )
+        assertIs<PrerequisiteValidation.Invalid>(wrongKind)
+        assertEquals(PrerequisiteRejectionReason.INVALID_PARENT, wrongKind.reason)
+
+        val nonGroupParent = todo("leaf-parent", 0)
+        val fromUnderLeaf = from.copy(groupId = nonGroupParent.id)
+        val targetUnderLeaf = target.copy(groupId = nonGroupParent.id)
+        val nonGroup = OrderingPolicy.validateProposedPrerequisites(
+            listOf(nonGroupParent, fromUnderLeaf, targetUnderLeaf), emptyList(), targetUnderLeaf, setOf(fromUnderLeaf.id),
+        )
+        assertIs<PrerequisiteValidation.Invalid>(nonGroup)
+        assertEquals(PrerequisiteRejectionReason.INVALID_PARENT, nonGroup.reason)
     }
 
     @Test

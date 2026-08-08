@@ -4,14 +4,19 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -60,6 +65,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.IntOffset
@@ -75,7 +81,10 @@ import jp.oboegaki.core.model.RelationType
 import jp.oboegaki.core.model.ThemeDefinition
 import jp.oboegaki.core.model.TodoDetail
 import jp.oboegaki.core.domain.GroupPolicy
+import jp.oboegaki.core.domain.OrderingPolicy
+import jp.oboegaki.core.domain.DatePickerPolicy
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.LocalDateTime
@@ -83,6 +92,7 @@ import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toInstant
 import kotlinx.datetime.toLocalDateTime
 import kotlin.math.roundToInt
+import kotlin.math.abs
 import kotlin.time.Clock
 
 @Composable
@@ -236,7 +246,6 @@ private fun AddScreen(
     settings: AppSettings,
     controller: AppController,
 ) {
-    val allTodos = sections.todos
     val allItems = allVisibleItems(sections)
     var text by remember { mutableStateOf("") }
     var body by remember { mutableStateOf("") }
@@ -402,12 +411,13 @@ private fun AddScreen(
                     Text("優先度", style = MaterialTheme.typography.subtitle1)
                     PriorityChoices(priority) { priority = it }
                 }
-                item {
+                if (!isGroup) item {
                     Text("先に終えるやること", style = MaterialTheme.typography.subtitle1)
-                    if (allTodos.isEmpty()) {
+                    val candidates = OrderingPolicy.prerequisiteCandidates(allItems, groupId)
+                    if (candidates.isEmpty()) {
                         Text("選べるやることはありません", style = MaterialTheme.typography.caption)
                     }
-                    allTodos.forEach { candidate ->
+                    candidates.forEach { candidate ->
                         Row(
                             Modifier.fillMaxWidth().height(52.dp).clickable {
                                 if (candidate.id in prerequisites) prerequisites.remove(candidate.id) else prerequisites.add(candidate.id)
@@ -433,9 +443,9 @@ private fun AddScreen(
                     )
                 }
                 item {
-                    DateTimeField("いつからできる？", available) { available = it }
-                    DateTimeField("行う時刻", scheduled) { scheduled = it }
-                    DateTimeField("期限", due) { due = it }
+                    DateTimeField("いつからできる？", available, settings.reducedMotion) { available = it }
+                    DateTimeField("行う時刻", scheduled, settings.reducedMotion) { scheduled = it }
+                    DateTimeField("期限", due, settings.reducedMotion) { due = it }
                 }
                 item {
                     RecurrenceEditor(
@@ -446,6 +456,7 @@ private fun AddScreen(
                         onUnitChange = { recurrenceUnit = it },
                         onIntervalChange = { recurrenceInterval = it },
                         onEndChange = { recurrenceEnd = it },
+                        reducedMotion = settings.reducedMotion,
                     )
                 }
             }
@@ -478,7 +489,6 @@ private fun EditScreen(
     controller: AppController,
 ) {
     val allItems = allVisibleItems(sections)
-    val allTodos = sections.todos
     var kind by remember(source.id) { mutableStateOf(source.kind) }
     var title by remember(source.id) { mutableStateOf(source.title) }
     var body by remember(source.id) { mutableStateOf(source.body) }
@@ -565,9 +575,9 @@ private fun EditScreen(
                     Text("優先度", style = MaterialTheme.typography.subtitle1)
                     PriorityChoices(priority) { priority = it }
                 }
-                item {
+                if (!source.isGroup) item {
                     Text("先に終えるやること", style = MaterialTheme.typography.subtitle1)
-                    val candidates = allTodos.filter { it.id != source.id }
+                    val candidates = OrderingPolicy.prerequisiteCandidates(allItems, groupId, source.id)
                     if (candidates.isEmpty()) Text("選べるやることはありません", style = MaterialTheme.typography.caption)
                     candidates.forEach { candidate ->
                         Row(
@@ -592,9 +602,9 @@ private fun EditScreen(
                     )
                 }
                 item {
-                    DateTimeField("いつからできる？", available) { available = it }
-                    DateTimeField("行う時刻", scheduled) { scheduled = it }
-                    DateTimeField("期限", due) { due = it }
+                    DateTimeField("いつからできる？", available, settings.reducedMotion) { available = it }
+                    DateTimeField("行う時刻", scheduled, settings.reducedMotion) { scheduled = it }
+                    DateTimeField("期限", due, settings.reducedMotion) { due = it }
                 }
                 item {
                     RecurrenceEditor(
@@ -605,6 +615,7 @@ private fun EditScreen(
                         onUnitChange = { recurrenceUnit = it },
                         onIntervalChange = { recurrenceInterval = it },
                         onEndChange = { recurrenceEnd = it },
+                        reducedMotion = settings.reducedMotion,
                     )
                 }
                 if (settings.calendarIntegrationEnabled) item {
@@ -706,6 +717,7 @@ private fun RecurrenceEditor(
     onUnitChange: (RecurrenceUnit?) -> Unit,
     onIntervalChange: (String) -> Unit,
     onEndChange: (Long?) -> Unit,
+    reducedMotion: Boolean,
 ) {
     Column(Modifier.fillMaxWidth()) {
         Text("定期設定", style = MaterialTheme.typography.subtitle1)
@@ -740,7 +752,7 @@ private fun RecurrenceEditor(
                 label = { Text("何${unit.label}ごと（1〜999）") },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             )
-            DateOnlyField("繰り返しの終了日", endAt, onEndChange)
+            DateOnlyField("繰り返しの終了日", endAt, reducedMotion, onEndChange)
             if (scheduledAt == null) {
                 Text(
                     "定期設定を使うには「行う時刻」を設定してください",
@@ -753,7 +765,12 @@ private fun RecurrenceEditor(
 }
 
 @Composable
-private fun DateOnlyField(label: String, value: Long?, onChange: (Long?) -> Unit) {
+private fun DateOnlyField(
+    label: String,
+    value: Long?,
+    reducedMotion: Boolean,
+    onChange: (Long?) -> Unit,
+) {
     var selectingDate by remember { mutableStateOf(false) }
     val local = value?.let { Instant.fromEpochMilliseconds(it).toLocalDateTime(TimeZone.currentSystemDefault()) }
     Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
@@ -768,6 +785,7 @@ private fun DateOnlyField(label: String, value: Long?, onChange: (Long?) -> Unit
     if (selectingDate) CalendarDatePickerDialog(
         label = label,
         value = value,
+        reducedMotion = reducedMotion,
         onDismiss = { selectingDate = false },
         onConfirm = { date ->
             onChange(replaceDate(value, date))
@@ -777,7 +795,12 @@ private fun DateOnlyField(label: String, value: Long?, onChange: (Long?) -> Unit
 }
 
 @Composable
-private fun DateTimeField(label: String, value: Long?, onChange: (Long?) -> Unit) {
+private fun DateTimeField(
+    label: String,
+    value: Long?,
+    reducedMotion: Boolean,
+    onChange: (Long?) -> Unit,
+) {
     var selectingDate by remember { mutableStateOf(false) }
     var selectingTime by remember { mutableStateOf(false) }
     val local = value?.let {
@@ -819,6 +842,7 @@ private fun DateTimeField(label: String, value: Long?, onChange: (Long?) -> Unit
         CalendarDatePickerDialog(
             label = label,
             value = value,
+            reducedMotion = reducedMotion,
             onDismiss = { selectingDate = false },
             onConfirm = {
                 onChange(replaceDate(value, it))
@@ -843,22 +867,48 @@ private fun DateTimeField(label: String, value: Long?, onChange: (Long?) -> Unit
 private fun CalendarDatePickerDialog(
     label: String,
     value: Long?,
+    reducedMotion: Boolean,
     onDismiss: () -> Unit,
     onConfirm: (LocalDate) -> Unit,
 ) {
     val initial = localDateTime(value)
-    var year by remember(value) { mutableStateOf(initial.year) }
+    var year by remember(value) { mutableStateOf(initial.year.coerceIn(DatePickerPolicy.FIRST_YEAR, DatePickerPolicy.LAST_YEAR)) }
     var month by remember(value) { mutableStateOf(initial.monthNumber) }
-    var selectedDay by remember(value) { mutableStateOf(initial.dayOfMonth) }
+    var selectedDay by remember(value) {
+        mutableStateOf(DatePickerPolicy.clampDay(year, month, initial.dayOfMonth))
+    }
+    var showingYears by remember { mutableStateOf(false) }
+    var dragging by remember { mutableStateOf(false) }
+    var horizontalDrag by remember { mutableFloatStateOf(0f) }
+    var verticalDrag by remember { mutableFloatStateOf(0f) }
+    var horizontalGesture by remember { mutableStateOf(false) }
+    val settleOffset = remember { Animatable(0f) }
+    val settleScope = rememberCoroutineScope()
+    var settleJob by remember { mutableStateOf<Job?>(null) }
+    val density = LocalDensity.current
+    val touchSlop = with(density) { 8.dp.toPx() }
+    val distanceThreshold = with(density) { 56.dp.toPx() }
 
-    fun moveMonth(amount: Int) {
-        val shifted = year * 12 + month - 1 + amount
-        year = shifted / 12
-        month = shifted % 12 + 1
-        selectedDay = selectedDay.coerceAtMost(daysInMonth(year, month))
+    fun monthAt(amount: Int): Pair<Int, Int>? {
+        val shifted = DatePickerPolicy.shiftMonth(year, month, amount)
+        return shifted.takeIf { it.year in DatePickerPolicy.FIRST_YEAR..DatePickerPolicy.LAST_YEAR }
+            ?.let { it.year to it.month }
     }
 
-    Dialog(onDismissRequest = onDismiss) {
+    fun updateMonth(amount: Int) {
+        monthAt(amount)?.let { (nextYear, nextMonth) ->
+            year = nextYear
+            month = nextMonth
+            selectedDay = DatePickerPolicy.clampDay(year, month, selectedDay)
+        }
+    }
+
+    fun cancelSettle() {
+        settleJob?.cancel()
+        settleJob = null
+    }
+
+    Dialog(onDismissRequest = { if (showingYears) showingYears = false else onDismiss() }) {
         Surface(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(24.dp),
@@ -869,41 +919,109 @@ private fun CalendarDatePickerDialog(
                 Text("${label}の日付", style = MaterialTheme.typography.h6)
                 Spacer(Modifier.height(12.dp))
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedButton(onClick = { moveMonth(-1) }, modifier = Modifier.height(44.dp)) { Text("前月") }
-                    Text(
-                        "$year 年 $month 月",
-                        modifier = Modifier.weight(1f),
-                        textAlign = TextAlign.Center,
-                        style = MaterialTheme.typography.subtitle1,
-                    )
-                    OutlinedButton(onClick = { moveMonth(1) }, modifier = Modifier.height(44.dp)) { Text("次月") }
-                }
-                Spacer(Modifier.height(10.dp))
-                Row(Modifier.fillMaxWidth()) {
-                    listOf("月", "火", "水", "木", "金", "土", "日").forEach {
-                        Text(it, Modifier.weight(1f), textAlign = TextAlign.Center, style = MaterialTheme.typography.caption)
+                    OutlinedButton(onClick = { updateMonth(-1) }, modifier = Modifier.height(44.dp)) { Text("前月") }
+                    TextButton(
+                        onClick = { showingYears = true },
+                        modifier = Modifier.weight(1f).height(48.dp),
+                    ) {
+                        Text("$year 年 $month 月", textAlign = TextAlign.Center, style = MaterialTheme.typography.subtitle1)
                     }
+                    OutlinedButton(onClick = { updateMonth(1) }, modifier = Modifier.height(44.dp)) { Text("次月") }
                 }
-                Spacer(Modifier.height(4.dp))
-                val firstOffset = LocalDate(year, month, 1).dayOfWeek.ordinal
-                val dayCount = daysInMonth(year, month)
-                repeat(6) { week ->
-                    Row(Modifier.fillMaxWidth()) {
-                        repeat(7) { weekday ->
-                            val day = week * 7 + weekday - firstOffset + 1
-                            if (day in 1..dayCount) {
-                                val modifier = Modifier.weight(1f).height(42.dp)
-                                if (day == selectedDay) {
-                                    Button(onClick = { selectedDay = day }, modifier = modifier, contentPadding = PaddingValues(0.dp)) {
-                                        Text(day.toString())
+                if (showingYears) {
+                    YearPicker(
+                        selectedYear = year,
+                        onSelect = {
+                            year = it
+                            selectedDay = DatePickerPolicy.clampDay(year, month, selectedDay)
+                            showingYears = false
+                        },
+                        onBack = { showingYears = false },
+                    )
+                    PlatformBackHandler(enabled = true) { showingYears = false }
+                } else {
+                    BoxWithConstraints(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .pointerInput(year, month) {
+                                detectDragGestures(
+                                    onDragStart = {
+                                        cancelSettle()
+                                        dragging = true
+                                        horizontalDrag = 0f
+                                        verticalDrag = 0f
+                                        horizontalGesture = false
+                                    },
+                                    onDragCancel = {
+                                        cancelSettle()
+                                        dragging = false
+                                        horizontalDrag = 0f
+                                        verticalDrag = 0f
+                                    },
+                                    onDragEnd = {
+                                        val direction = when {
+                                            horizontalGesture && horizontalDrag <= -distanceThreshold -> 1
+                                            horizontalGesture && horizontalDrag >= distanceThreshold -> -1
+                                            else -> 0
+                                        }
+                                        val canMove = direction != 0 && monthAt(direction) != null
+                                        if (!canMove || direction == 0) {
+                                            dragging = false
+                                            horizontalDrag = 0f
+                                            verticalDrag = 0f
+                                        } else if (reducedMotion) {
+                                            updateMonth(direction)
+                                            dragging = false
+                                            horizontalDrag = 0f
+                                            verticalDrag = 0f
+                                        } else {
+                                            val width = size.width.toFloat().coerceAtLeast(1f)
+                                            val target = if (direction > 0) -width else width
+                                            settleJob = settleScope.launch {
+                                                settleOffset.snapTo(horizontalDrag)
+                                                settleOffset.animateTo(target, tween(200, easing = LinearEasing))
+                                                updateMonth(direction)
+                                                settleOffset.snapTo(0f)
+                                                horizontalDrag = 0f
+                                                verticalDrag = 0f
+                                                dragging = false
+                                                settleJob = null
+                                            }
+                                        }
+                                    },
+                                ) { change, amount ->
+                                    val nextX = horizontalDrag + amount.x
+                                    val nextY = verticalDrag + amount.y
+                                    if (!horizontalGesture &&
+                                        (abs(nextX) > touchSlop || abs(nextY) > touchSlop)
+                                    ) {
+                                        horizontalGesture = abs(nextX) > abs(nextY) * 1.25f
                                     }
-                                } else {
-                                    TextButton(onClick = { selectedDay = day }, modifier = modifier, contentPadding = PaddingValues(0.dp)) {
-                                        Text(day.toString())
+                                    if (horizontalGesture) {
+                                        change.consume()
+                                        horizontalDrag = nextX
+                                        verticalDrag = nextY
                                     }
                                 }
-                            } else {
-                                Spacer(Modifier.weight(1f).height(42.dp))
+                            },
+                    ) {
+                        val offset = if (dragging && settleJob != null) settleOffset.value else horizontalDrag
+                        val width = constraints.maxWidth.toFloat().coerceAtLeast(1f)
+                        val direction = if (offset < 0f) 1 else -1
+                        val adjacent = monthAt(direction)
+                        Row(
+                            Modifier.width(maxWidth).offset { IntOffset(
+                                (if (offset < 0f) offset else -width + offset).roundToInt(),
+                                0,
+                            ) },
+                        ) {
+                            if (offset >= 0f && adjacent != null) {
+                                CalendarMonthPage(adjacent.first, adjacent.second, DatePickerPolicy.clampDay(adjacent.first, adjacent.second, selectedDay)) {}
+                            }
+                            CalendarMonthPage(year, month, selectedDay) { selectedDay = it }
+                            if (offset < 0f && adjacent != null) {
+                                CalendarMonthPage(adjacent.first, adjacent.second, DatePickerPolicy.clampDay(adjacent.first, adjacent.second, selectedDay)) {}
                             }
                         }
                     }
@@ -918,6 +1036,74 @@ private fun CalendarDatePickerDialog(
                         onClick = { onConfirm(LocalDate(year, month, selectedDay)) },
                         modifier = Modifier.weight(1f).height(50.dp),
                     ) { Text("この日を選ぶ") }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun YearPicker(selectedYear: Int, onSelect: (Int) -> Unit, onBack: () -> Unit) {
+    val years = remember { (DatePickerPolicy.FIRST_YEAR..DatePickerPolicy.LAST_YEAR).toList() }
+    val state = rememberLazyListState(
+        initialFirstVisibleItemIndex = (selectedYear - DatePickerPolicy.FIRST_YEAR).coerceIn(0, years.lastIndex),
+    )
+    LaunchedEffect(selectedYear) {
+        state.scrollToItem((selectedYear - DatePickerPolicy.FIRST_YEAR).coerceIn(0, years.lastIndex))
+    }
+    Column(Modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("年を選ぶ", style = MaterialTheme.typography.subtitle1, modifier = Modifier.weight(1f))
+            TextButton(onClick = onBack, modifier = Modifier.height(44.dp)) { Text("月に戻る") }
+        }
+        LazyColumn(
+            state = state,
+            modifier = Modifier.fillMaxWidth().height(300.dp),
+            contentPadding = PaddingValues(vertical = 110.dp),
+        ) {
+            itemsIndexed(years) { _, value ->
+                if (value == selectedYear) {
+                    Button(onClick = { onSelect(value) }, Modifier.fillMaxWidth().height(48.dp)) { Text("$value 年") }
+                } else {
+                    TextButton(onClick = { onSelect(value) }, Modifier.fillMaxWidth().height(48.dp)) { Text("$value 年") }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CalendarMonthPage(
+    year: Int,
+    month: Int,
+    selectedDay: Int,
+    onDaySelected: (Int) -> Unit,
+) {
+    Row(Modifier.fillMaxWidth()) {
+        listOf("月", "火", "水", "木", "金", "土", "日").forEach {
+            Text(it, Modifier.weight(1f), textAlign = TextAlign.Center, style = MaterialTheme.typography.caption)
+        }
+    }
+    Spacer(Modifier.height(4.dp))
+    val firstOffset = LocalDate(year, month, 1).dayOfWeek.ordinal
+    val dayCount = DatePickerPolicy.daysInMonth(year, month)
+    repeat(6) { week ->
+        Row(Modifier.fillMaxWidth()) {
+            repeat(7) { weekday ->
+                val day = week * 7 + weekday - firstOffset + 1
+                if (day in 1..dayCount) {
+                    val modifier = Modifier.weight(1f).height(42.dp)
+                    if (day == selectedDay) {
+                        Button(onClick = { onDaySelected(day) }, modifier = modifier, contentPadding = PaddingValues(0.dp)) {
+                            Text(day.toString())
+                        }
+                    } else {
+                        TextButton(onClick = { onDaySelected(day) }, modifier = modifier, contentPadding = PaddingValues(0.dp)) {
+                            Text(day.toString())
+                        }
+                    }
+                } else {
+                    Spacer(Modifier.weight(1f).height(42.dp))
                 }
             }
         }
@@ -1167,9 +1353,3 @@ private fun formatTimePart(value: LocalDateTime): String =
     "${value.hour.twoDigits()}:${value.minute.twoDigits()}"
 
 private fun Int.twoDigits(): String = toString().padStart(2, '0')
-
-private fun daysInMonth(year: Int, month: Int): Int = when (month) {
-    2 -> if (year % 400 == 0 || year % 4 == 0 && year % 100 != 0) 29 else 28
-    4, 6, 9, 11 -> 30
-    else -> 31
-}

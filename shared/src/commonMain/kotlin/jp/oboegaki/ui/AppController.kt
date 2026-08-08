@@ -3,6 +3,8 @@ package jp.oboegaki.ui
 import jp.oboegaki.core.data.BuiltInThemes
 import jp.oboegaki.core.data.ItemRepository
 import jp.oboegaki.core.domain.MoveDecision
+import jp.oboegaki.core.domain.CalendarRecurrenceDecision
+import jp.oboegaki.core.domain.CalendarRecurrencePolicy
 import jp.oboegaki.core.domain.DeferConfiguration
 import jp.oboegaki.core.domain.SplitValidation
 import jp.oboegaki.core.domain.ThemeValidation
@@ -25,6 +27,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.datetime.TimeZone
 
 enum class MainTab { TODOS, MEMOS, ALL }
 
@@ -217,7 +220,21 @@ class AppController(
             showMessage("行う時刻、期限、または開始可能日時を設定してください")
             return@launch
         }
+        if (detail?.recurrence != null && detail.scheduledAtEpochMillis == null) {
+            showMessage("定期設定をカレンダーに追加するには行う時刻を設定してください")
+            return@launch
+        }
         val end = start + (detail?.estimatedMinutes ?: 30).coerceIn(1, 1440) * 60_000L
+        val timeZone = TimeZone.currentSystemDefault()
+        val calendarRecurrence = detail?.recurrence?.let { rule ->
+            when (val decision = CalendarRecurrencePolicy.fromRule(rule, start, timeZone)) {
+                is CalendarRecurrenceDecision.Supported -> decision.recurrence
+                is CalendarRecurrenceDecision.Unsupported -> {
+                    showMessage(decision.message)
+                    return@launch
+                }
+            }
+        }
         when (val result = calendarExporter.export(
             CalendarEventDraft(
                 itemId = item.id,
@@ -225,6 +242,8 @@ class AppController(
                 notes = item.body,
                 startAtEpochMillis = start,
                 endAtEpochMillis = end,
+                timeZoneId = timeZone.id,
+                recurrence = calendarRecurrence,
             ),
         )) {
             CalendarExportResult.Opened -> showMessage("カレンダーの追加画面を開きました")

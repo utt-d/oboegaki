@@ -1,11 +1,15 @@
 package jp.oboegaki.platform
 
+import jp.oboegaki.core.model.CalendarRecurrence
+
 data class CalendarEventDraft(
     val itemId: String,
     val title: String,
     val notes: String,
     val startAtEpochMillis: Long,
     val endAtEpochMillis: Long,
+    val timeZoneId: String = "UTC",
+    val recurrence: CalendarRecurrence? = null,
 )
 
 sealed interface CalendarExportResult {

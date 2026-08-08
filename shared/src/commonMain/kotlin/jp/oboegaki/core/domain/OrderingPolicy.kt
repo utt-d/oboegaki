@@ -20,7 +20,9 @@ enum class PrerequisiteRejectionReason {
     DANGLING_ENDPOINT,
     INACTIVE_ENDPOINT,
     NON_TODO_ENDPOINT,
+    GROUP_ENDPOINT,
     DIFFERENT_GROUP,
+    INVALID_PARENT,
     SCHEDULE_CONFLICT,
     PRIORITY_CONFLICT,
 }
@@ -147,6 +149,23 @@ object OrderingPolicy {
         return false
     }
 
+    /** Candidates shown by leaf editors and reused by non-UI validation tests. */
+    fun prerequisiteCandidates(
+        items: List<AppItem>,
+        directGroupId: String?,
+        targetId: String? = null,
+    ): List<AppItem> = items
+        .asSequence()
+        .filter {
+            it.kind == ItemKind.TODO &&
+                !it.isGroup &&
+                it.lifecycle == ItemLifecycle.ACTIVE &&
+                it.groupId == directGroupId &&
+                it.id != targetId
+        }
+        .sortedWith(compareBy<AppItem> { it.manualRank }.thenBy { it.id })
+        .toList()
+
     /**
      * Validates the complete relation set after replacing the target item's
      * required-before inputs with [prerequisiteIds]. This is the single core
@@ -197,10 +216,24 @@ object OrderingPolicy {
                     "前提関係にはやることだけ指定できます",
                 )
             }
+            if (from.isGroup || to.isGroup) {
+                return PrerequisiteValidation.Invalid(
+                    PrerequisiteRejectionReason.GROUP_ENDPOINT,
+                    "グループは実行対象ではないため、先に終えるやることには指定できません",
+                )
+            }
             if (from.groupId != to.groupId) {
                 return PrerequisiteValidation.Invalid(
                     PrerequisiteRejectionReason.DIFFERENT_GROUP,
                     "前提関係は同じグループ内のやることに指定してください",
+                )
+            }
+            if (from.groupId != null &&
+                (!hasActiveDirectParent(from, byId) || !hasActiveDirectParent(to, byId))
+            ) {
+                return PrerequisiteValidation.Invalid(
+                    PrerequisiteRejectionReason.INVALID_PARENT,
+                    "蜑肴署髢｢菫ゅ・隕九▽縺九ｊ縺ｾ縺帙ｓ",
                 )
             }
         }
@@ -260,8 +293,11 @@ object OrderingPolicy {
                 val to = byId[relation.toItemId] ?: return@forEach
                 if (from.id == to.id ||
                     from.kind != ItemKind.TODO || to.kind != ItemKind.TODO ||
+                    from.isGroup || to.isGroup ||
                     from.lifecycle != ItemLifecycle.ACTIVE || to.lifecycle != ItemLifecycle.ACTIVE ||
-                    from.groupId != to.groupId
+                    from.groupId != to.groupId ||
+                    !hasActiveDirectParent(from, byId) ||
+                    !hasActiveDirectParent(to, byId)
                 ) return@forEach
                 if (relation.type == RelationType.REQUIRED_BEFORE) {
                     if (immutableConflict(items, relation) != null ||
@@ -271,6 +307,12 @@ object OrderingPolicy {
                 accepted += relation
             }
         return accepted
+    }
+
+    private fun hasActiveDirectParent(item: AppItem, byId: Map<String, AppItem>): Boolean {
+        val parentId = item.groupId ?: return true
+        val parent = byId[parentId] ?: return false
+        return parent.isGroup && parent.kind == item.kind && parent.lifecycle == ItemLifecycle.ACTIVE
     }
 
     private fun immutableConflict(

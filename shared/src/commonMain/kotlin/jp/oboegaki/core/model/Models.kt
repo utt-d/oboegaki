@@ -43,6 +43,22 @@ enum class RecurrenceUnit {
         }
 }
 
+/** Platform-neutral recurrence information passed to an external calendar. */
+@Serializable
+enum class CalendarRecurrenceFrequency { DAILY, WEEKLY, MONTHLY, YEARLY }
+
+@Serializable
+data class CalendarRecurrence(
+    val frequency: CalendarRecurrenceFrequency,
+    val interval: Int,
+    /** The local date is inclusive. The epoch is normalized by the domain policy. */
+    val endAtEpochMillis: Long? = null,
+    val monthOfYear: Int? = null,
+    val dayOfMonth: Int? = null,
+    /** RFC 5545 BYMONTHDAY=-1 / the last day of the month. */
+    val lastDayOfMonth: Boolean = false,
+)
+
 @Serializable
 data class RecurrenceRule(
     val unit: RecurrenceUnit,

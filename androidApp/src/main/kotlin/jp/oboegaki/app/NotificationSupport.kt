@@ -22,6 +22,7 @@ internal object NotificationContract {
     const val EXTRA_OPERATION_ID = "operation_id"
     const val EXTRA_NOTIFICATION_ACTION = "notification_action"
     const val EXTRA_EXPIRES_AT = "expires_at"
+    const val EXTRA_RETRY_ATTEMPT = "retry_attempt"
 }
 
 internal object PendingIntentIdentity {
@@ -195,9 +196,12 @@ internal object ReminderNotificationSupport {
         return builder.build()
     }
 
-    fun notifySafely(context: Context, id: Int, notification: Notification) {
-        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return
-        runCatching { context.getSystemService(NotificationManager::class.java).notify(id, notification) }
+    fun notifySafely(context: Context, id: Int, notification: Notification): Boolean {
+        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return false
+        return runCatching {
+            context.getSystemService(NotificationManager::class.java).notify(id, notification)
+            true
+        }.getOrDefault(false)
     }
 
     fun cancelSafely(context: Context, id: Int) {

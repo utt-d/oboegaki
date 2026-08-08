@@ -17,6 +17,7 @@ import kotlinx.datetime.toLocalDateTime
 enum class GroupRejectionReason {
     GROUP_NOT_FOUND,
     PARENT_IS_NOT_GROUP,
+    INACTIVE_PARENT,
     DIFFERENT_KIND,
     SELF_OR_DESCENDANT,
     UNSORTED_NOT_SUPPORTED,
@@ -55,6 +56,12 @@ object GroupPolicy {
             return GroupPlacementDecision.Rejected(
                 GroupRejectionReason.PARENT_IS_NOT_GROUP,
                 "通常の項目をグループとして選ぶことはできません",
+            )
+        }
+        if (parent.lifecycle != ItemLifecycle.ACTIVE) {
+            return GroupPlacementDecision.Rejected(
+                GroupRejectionReason.INACTIVE_PARENT,
+                "有効なグループにだけ入れられます",
             )
         }
         if (parent.kind != item.kind) {

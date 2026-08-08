@@ -56,6 +56,17 @@ class GroupPolicyTest {
     }
 
     @Test
+    fun rejectsPlacementIntoAnInactiveParent() {
+        val leaf = item("leaf")
+        val parent = item("parent", isGroup = true).copy(lifecycle = ItemLifecycle.DELETED)
+
+        val decision = GroupPolicy.validatePlacement(leaf, parent.id, listOf(leaf, parent))
+
+        assertIs<GroupPlacementDecision.Rejected>(decision)
+        assertEquals(GroupRejectionReason.INACTIVE_PARENT, decision.reason)
+    }
+
+    @Test
     fun collapsingAGroupHidesEveryNestedLevel() {
         val root = item("root", isGroup = true)
         val childGroup = item("child-group", isGroup = true, groupId = root.id)

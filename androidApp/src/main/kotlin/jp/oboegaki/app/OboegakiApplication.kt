@@ -8,6 +8,7 @@ import jp.oboegaki.core.data.AppDatabase
 import jp.oboegaki.core.data.RoomItemRepository
 import jp.oboegaki.core.data.buildDatabase
 import jp.oboegaki.core.data.databaseBuilder
+import jp.oboegaki.platform.initializeNotificationDiagnostics
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -23,12 +24,6 @@ class OboegakiApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        database = buildDatabase(databaseBuilder(this))
-        reminderScheduler = AndroidReminderScheduler(this)
-        repository = RoomItemRepository(database, reminderScheduler)
-        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
-            runCatching { reminderScheduler.applySettings(repository.getSettings()) }
-        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(NotificationChannel(
@@ -36,6 +31,13 @@ class OboegakiApplication : Application() {
                 getString(R.string.notification_channel_name),
                 NotificationManager.IMPORTANCE_DEFAULT,
             ))
+        }
+        initializeNotificationDiagnostics(this)
+        database = buildDatabase(databaseBuilder(this))
+        reminderScheduler = AndroidReminderScheduler(this)
+        repository = RoomItemRepository(database, reminderScheduler)
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            runCatching { reminderScheduler.applySettings(repository.getSettings()) }
         }
     }
 
