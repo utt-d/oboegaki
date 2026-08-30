@@ -20,6 +20,10 @@ import jp.oboegaki.platform.CalendarEventDraft
 import jp.oboegaki.platform.CalendarExportResult
 import jp.oboegaki.platform.CalendarExporter
 import jp.oboegaki.platform.NoOpCalendarExporter
+import jp.oboegaki.platform.BackupFileGateway
+import jp.oboegaki.platform.BackupFileResult
+import jp.oboegaki.platform.NoOpBackupFileGateway
+import jp.oboegaki.core.data.BackupInspectionResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -48,7 +52,10 @@ class AppController(
     private val repository: ItemRepository,
     private val scope: CoroutineScope,
     private val calendarExporter: CalendarExporter = NoOpCalendarExporter,
+    private val backupFileGateway: BackupFileGateway = NoOpBackupFileGateway,
 ) {
+    val backupFilesAvailable: Boolean = backupFileGateway.isAvailable
+
     private val _sections = MutableStateFlow(AllSections())
     val sections: StateFlow<AllSections> = _sections
     private val _settings = MutableStateFlow(AppSettings())
@@ -393,9 +400,38 @@ class AppController(
         showMessage("バックアップを作成しました")
     }
 
+    fun exportBackupFile() = scope.launch {
+        when (val result = backupFileGateway.save(repository.exportBackupJson())) {
+            BackupFileResult.Saved -> showMessage("バックアップを保存しました")
+            BackupFileResult.Cancelled -> Unit
+            BackupFileResult.TooLarge -> showMessage("50MBを超えるバックアップは保存できません")
+            is BackupFileResult.Failed -> showMessage(result.reason)
+            is BackupFileResult.Content -> showMessage("バックアップを保存できませんでした")
+        }
+    }
+
+    fun importBackupFile(onLoaded: (String) -> Unit) = scope.launch {
+        when (val result = backupFileGateway.open()) {
+            is BackupFileResult.Content -> onLoaded(result.value)
+            BackupFileResult.Cancelled -> Unit
+            BackupFileResult.TooLarge -> showMessage("50MBを超えるバックアップは読み込めません")
+            is BackupFileResult.Failed -> showMessage(result.reason)
+            BackupFileResult.Saved -> showMessage("バックアップを読み込めませんでした")
+        }
+    }
+
+    fun inspectBackup(value: String, onResult: (BackupInspectionResult) -> Unit) = scope.launch {
+        onResult(repository.inspectBackupJson(value))
+    }
+
     fun importBackup(value: String) = scope.launch {
         val result = repository.importBackupJson(value)
-        if (result.successful) showUndo(result.message) else showMessage(result.message)
+        if (result.successful) {
+            closeOverlay()
+            showUndo(result.message)
+        } else {
+            showMessage(result.message)
+        }
     }
 
     fun undo() = scope.launch {

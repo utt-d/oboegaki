@@ -58,6 +58,8 @@ import jp.oboegaki.core.model.MainNavigationButton
 import jp.oboegaki.core.model.TopActionButton
 import jp.oboegaki.platform.CalendarExporter
 import jp.oboegaki.platform.NoOpCalendarExporter
+import jp.oboegaki.platform.BackupFileGateway
+import jp.oboegaki.platform.NoOpBackupFileGateway
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -67,11 +69,14 @@ import kotlin.math.roundToInt
 fun OboegakiApp(
     repository: ItemRepository,
     calendarExporter: CalendarExporter = NoOpCalendarExporter,
+    backupFileGateway: BackupFileGateway = NoOpBackupFileGateway,
     focusItemId: String? = null,
     focusRequestKey: Long = 0L,
 ) {
     val scope = rememberCoroutineScope()
-    val controller = remember(repository, scope, calendarExporter) { AppController(repository, scope, calendarExporter) }
+    val controller = remember(repository, scope, calendarExporter, backupFileGateway) {
+        AppController(repository, scope, calendarExporter, backupFileGateway)
+    }
     val sections by controller.sections.collectAsState()
     val settings by controller.settings.collectAsState()
     val themes by controller.themes.collectAsState()

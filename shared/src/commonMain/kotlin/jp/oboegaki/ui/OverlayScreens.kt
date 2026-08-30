@@ -36,6 +36,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.Button
+import androidx.compose.material.Card
 import androidx.compose.material.Checkbox
 import androidx.compose.material.Divider
 import androidx.compose.material.MaterialTheme
@@ -548,6 +549,9 @@ private fun EditScreen(
             addAll(relations.filter { it.toItemId == source.id && it.type == RelationType.REQUIRED_BEFORE }.map { it.fromItemId })
         }
     }
+    var classificationExpanded by remember(source.id) { mutableStateOf(false) }
+    var orderingExpanded by remember(source.id) { mutableStateOf(false) }
+    var scheduleExpanded by remember(source.id) { mutableStateOf(false) }
     val candidateGroups = GroupPolicy.availableParents(source.copy(kind = kind), allItems)
     LaunchedEffect(kind, candidateGroups) {
         if (kind == ItemKind.UNSORTED) groupId = null
@@ -586,69 +590,98 @@ private fun EditScreen(
                 Modifier.fillMaxWidth().weight(1f),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-            if (!source.isGroup) {
-                item {
-                    Text("種類", style = MaterialTheme.typography.subtitle1)
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        KindChoice("あとで分ける", ItemKind.UNSORTED, kind) { kind = it }
-                        KindChoice("やること", ItemKind.TODO, kind) { kind = it }
-                        KindChoice("メモ", ItemKind.MEMO, kind) { kind = it }
-                    }
-                }
-            } else item {
-                Text(if (kind == ItemKind.TODO) "やることグループ" else "メモグループ", style = MaterialTheme.typography.subtitle1)
-            }
             item {
                 OutlinedTextField(title, { title = it.take(200) }, Modifier.fillMaxWidth(), label = { Text("タイトル") })
                 Spacer(Modifier.height(10.dp))
                 OutlinedTextField(body, { body = it.take(100_000) }, Modifier.fillMaxWidth(), label = { Text("本文") }, minLines = 4, maxLines = 12)
             }
-            if (kind != ItemKind.UNSORTED) item {
-                GroupPicker(
-                    title = "入れるグループ",
-                    selectedGroupId = groupId,
-                    groups = candidateGroups,
-                    allItems = allItems,
-                    onSelect = { groupId = it },
-                )
-            }
-            if (kind == ItemKind.TODO) {
-                item {
-                    Text("優先度", style = MaterialTheme.typography.subtitle1)
-                    PriorityChoices(priority) { priority = it }
-                }
-                if (!source.isGroup) item {
-                    Text("先に終えるやること", style = MaterialTheme.typography.subtitle1)
-                    val candidates = OrderingPolicy.prerequisiteCandidates(allItems, groupId, source.id)
-                    if (candidates.isEmpty()) Text("選べるやることはありません", style = MaterialTheme.typography.caption)
-                    candidates.forEach { candidate ->
-                        Row(
-                            Modifier.fillMaxWidth().height(52.dp).clickable {
-                                if (candidate.id in prerequisites) prerequisites.remove(candidate.id) else prerequisites.add(candidate.id)
-                            },
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Checkbox(candidate.id in prerequisites, onCheckedChange = {
-                                if (it) { if (candidate.id !in prerequisites) prerequisites.add(candidate.id) }
-                                else prerequisites.remove(candidate.id)
-                            })
-                            Text(candidate.title, Modifier.weight(1f), maxLines = 2)
+            item {
+                CollapsibleEditSection(
+                    title = "分類とグループ",
+                    summary = when {
+                        source.isGroup -> if (kind == ItemKind.TODO) "やることグループ" else "メモグループ"
+                        kind == ItemKind.TODO -> "やること${groupId?.let { "・グループあり" } ?: "・グループなし"}"
+                        kind == ItemKind.MEMO -> "メモ${groupId?.let { "・グループあり" } ?: "・グループなし"}"
+                        else -> "あとで分ける"
+                    },
+                    expanded = classificationExpanded,
+                    onToggle = { classificationExpanded = !classificationExpanded },
+                ) {
+                    if (!source.isGroup) {
+                        Text("種類", style = MaterialTheme.typography.subtitle1)
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            KindChoice("あとで分ける", ItemKind.UNSORTED, kind) { kind = it }
+                            KindChoice("やること", ItemKind.TODO, kind) { kind = it }
+                            KindChoice("メモ", ItemKind.MEMO, kind) { kind = it }
                         }
                     }
-                    Text("循環する前後関係は保存できません", style = MaterialTheme.typography.caption)
+                    if (kind != ItemKind.UNSORTED) {
+                        Spacer(Modifier.height(12.dp))
+                        GroupPicker(
+                            title = "入れるグループ",
+                            selectedGroupId = groupId,
+                            groups = candidateGroups,
+                            allItems = allItems,
+                            onSelect = { groupId = it },
+                        )
+                    }
                 }
-                item {
+            }
+            if (kind == ItemKind.TODO) item {
+                CollapsibleEditSection(
+                    title = "順番と目安",
+                    summary = buildString {
+                        append("優先度: ${priority.label}")
+                        if (estimated.isBlank()) append("・予想時間なし") else append("・約${estimated}分")
+                        append("・先に終える ${prerequisites.size}件")
+                    },
+                    expanded = orderingExpanded,
+                    onToggle = { orderingExpanded = !orderingExpanded },
+                ) {
+                    Text("優先度", style = MaterialTheme.typography.subtitle1)
+                    PriorityChoices(priority) { priority = it }
+                    if (!source.isGroup) {
+                        Spacer(Modifier.height(12.dp))
+                        Text("先に終えるやること", style = MaterialTheme.typography.subtitle1)
+                        val candidates = OrderingPolicy.prerequisiteCandidates(allItems, groupId, source.id)
+                        if (candidates.isEmpty()) Text("選べるやることはありません", style = MaterialTheme.typography.caption)
+                        candidates.forEach { candidate ->
+                            Row(
+                                Modifier.fillMaxWidth().height(52.dp).clickable {
+                                    if (candidate.id in prerequisites) prerequisites.remove(candidate.id) else prerequisites.add(candidate.id)
+                                },
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Checkbox(candidate.id in prerequisites, onCheckedChange = {
+                                    if (it) { if (candidate.id !in prerequisites) prerequisites.add(candidate.id) }
+                                    else prerequisites.remove(candidate.id)
+                                })
+                                Text(candidate.title, Modifier.weight(1f), maxLines = 2)
+                            }
+                        }
+                        Text("循環する前後関係は保存できません", style = MaterialTheme.typography.caption)
+                    }
+                    Spacer(Modifier.height(8.dp))
                     OutlinedTextField(
                         estimated, { estimated = it.filter(Char::isDigit).take(4) }, Modifier.fillMaxWidth(),
                         label = { Text("予想時間（1〜1440分）") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     )
                 }
-                item {
+            }
+            if (kind == ItemKind.TODO) item {
+                CollapsibleEditSection(
+                    title = "日時と繰り返し",
+                    summary = buildString {
+                        append(if (scheduled == null) "行う時刻なし" else "行う時刻あり")
+                        if (recurrenceUnit != null) append("・${recurrenceUnit!!.label}ごと")
+                        if (due != null) append("・期限あり")
+                    },
+                    expanded = scheduleExpanded,
+                    onToggle = { scheduleExpanded = !scheduleExpanded },
+                ) {
                     DateTimeField("いつからできる？", available, settings.reducedMotion) { available = it }
                     DateTimeField("行う時刻", scheduled, settings.reducedMotion) { scheduled = it }
                     DateTimeField("期限", due, settings.reducedMotion) { due = it }
-                }
-                item {
                     RecurrenceEditor(
                         unit = recurrenceUnit,
                         interval = recurrenceInterval,
@@ -659,30 +692,24 @@ private fun EditScreen(
                         onEndChange = { recurrenceEnd = it },
                         reducedMotion = settings.reducedMotion,
                     )
-                }
-                if (settings.calendarIntegrationEnabled) item {
-                    val hasCalendarDate = scheduled != null || due != null || available != null
-                    OutlinedButton(
-                        onClick = { controller.addToCalendar(draftItem()) },
-                        enabled = title.isNotBlank() && hasCalendarDate,
-                        modifier = Modifier.fillMaxWidth().height(52.dp),
-                    ) {
-                        Text("端末のカレンダーに追加")
+                    if (settings.calendarIntegrationEnabled) {
+                        val hasCalendarDate = scheduled != null || due != null || available != null
+                        OutlinedButton(
+                            onClick = { controller.addToCalendar(draftItem()) },
+                            enabled = title.isNotBlank() && hasCalendarDate,
+                            modifier = Modifier.fillMaxWidth().height(52.dp),
+                        ) { Text("端末のカレンダーに追加") }
+                        Text(
+                            if (hasCalendarDate) "Google カレンダー、Outlookなど、端末に設定されたカレンダーへ追加します。追加先の選択方法は端末により異なります。"
+                            else "行う時刻、期限、または開始可能日時を設定すると追加できます。",
+                            style = MaterialTheme.typography.caption,
+                            color = parseColor(LocalThemeColors.current.textSecondary),
+                        )
                     }
-                    Text(
-                        if (hasCalendarDate) {
-                            "Google カレンダー、Outlookなど、端末に設定されたカレンダーへ追加します。追加先の選択方法は端末により異なります。"
-                        } else {
-                            "行う時刻、期限、または開始可能日時を設定すると追加できます。"
-                        },
-                        style = MaterialTheme.typography.caption,
-                        color = parseColor(LocalThemeColors.current.textSecondary),
-                    )
-                }
-                if ((source.todo?.deferCount ?: 0) > 0) item {
-                    Text("${source.todo?.deferCount}回 後で行うことにしています")
-                    OutlinedButton(onClick = { controller.closeOverlay(); controller.openThemeEditor(jp.oboegaki.core.data.BuiltInThemes.standard) }, enabled = false) {
-                        Text("小さく分ける提案は後回し回数に応じて表示されます")
+                    if ((source.todo?.deferCount ?: 0) > 0) {
+                        Spacer(Modifier.height(8.dp))
+                        Text("${source.todo?.deferCount}回 後で行うことにしています")
+                        Text("小さく分ける提案は後回し回数に応じて表示されます", style = MaterialTheme.typography.caption)
                     }
                 }
             }
@@ -709,6 +736,38 @@ private fun EditScreen(
                     enabled = title.isNotBlank() && (recurrenceUnit == null || scheduled != null),
                     modifier = Modifier.weight(1f).height(52.dp),
                 ) { Text("保存") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CollapsibleEditSection(
+    title: String,
+    summary: String,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(LocalAppTheme.current.mediumCornerDp.dp),
+        elevation = 1.dp,
+        backgroundColor = parseColor(LocalThemeColors.current.surface),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(12.dp)) {
+            OutlinedButton(onClick = onToggle, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f), horizontalAlignment = Alignment.Start) {
+                        Text(title, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                        Text(summary, style = MaterialTheme.typography.caption, maxLines = 2)
+                    }
+                    Text(if (expanded) "⌃" else "⌄", style = MaterialTheme.typography.h6)
+                }
+            }
+            if (expanded) {
+                Spacer(Modifier.height(12.dp))
+                content()
             }
         }
     }

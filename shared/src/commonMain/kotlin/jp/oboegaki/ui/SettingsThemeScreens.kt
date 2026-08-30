@@ -3,6 +3,7 @@ package jp.oboegaki.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -13,11 +14,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.Button
+import androidx.compose.material.AlertDialog
 import androidx.compose.material.Card
 import androidx.compose.material.Divider
 import androidx.compose.material.MaterialTheme
@@ -30,16 +33,21 @@ import androidx.compose.material.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.sp
 import jp.oboegaki.core.domain.ThemePolicy
+import jp.oboegaki.core.data.BackupInspectionResult
 import jp.oboegaki.core.model.AppearanceMode
 import jp.oboegaki.core.model.AddButtonPosition
 import jp.oboegaki.core.model.AppSettings
@@ -58,6 +66,7 @@ import androidx.compose.runtime.LaunchedEffect
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlin.math.roundToInt
+import kotlin.math.abs
 
 @Composable
 fun SettingsScreen(settings: AppSettings, controller: AppController) {
@@ -398,49 +407,69 @@ fun OperationGuideScreen(
                     )
                 }
                 item {
-                    GuideStep(
-                        icon = "${icons.previous} ${icons.next}",
-                        title = "カードを上下に動かす",
-                        points = listOf(
-                            "上へスワイプ：次の項目へ移動",
-                            "下へスワイプ：前の項目へ移動",
-                            "前後のカードも指に合わせて動きます。",
-                        ),
+                    GuidePractice(
+                        icons = icons,
                     )
                 }
-                item {
-                    GuideStep(
-                        icon = "${icons.defer}  ${icons.complete}",
-                        title = "左右で整理する",
-                        points = listOf(
-                            "やること　左：後で行う ／ 右：完了",
-                            "メモ　　　左：しまう ／ 右：やることにする",
-                            "操作後は「元に戻す」が使えます。",
-                        ),
-                    )
-                }
-                item {
-                    GuideStep(
-                        icon = "${icons.todo}  ${icons.memo}  ${icons.all}",
-                        title = "画面を切り替える",
-                        points = listOf(
-                            "画面下の項目をタップして切り替えます。",
-                            "設定を有効にすると、空きスペースの左右スワイプでも切り替えられます。",
-                            "「すべて」では、編集・並べ替え・復元ができます。",
-                        ),
-                    )
-                }
-                item {
-                    GuideStep(
-                        icon = "${icons.theme}  ${icons.settings}",
-                        title = "外観と操作を調整する",
-                        points = listOf(
-                            "「すべて」画面から、テーマと設定を開けます。",
-                            "色・フォント・アイコン・ボタン配置・動き・触覚などを変更できます。",
-                            "このガイドも設定から見返せます。",
-                        ),
-                    )
-                    Spacer(Modifier.height(20.dp))
+                if (firstLaunch) {
+                    item {
+                        GuideStep(
+                            icon = "${icons.memo}  ${icons.defer}  ${icons.complete}",
+                            title = "これだけ覚えれば始められます",
+                            points = listOf(
+                                "メモは、左でしまう・右でやることにします。",
+                                "操作後は「元に戻す」が使えます。",
+                                "詳しい説明は設定からいつでも見返せます。",
+                            ),
+                        )
+                        Spacer(Modifier.height(20.dp))
+                    }
+                } else {
+                    item {
+                        GuideStep(
+                            icon = "${icons.previous} ${icons.next}",
+                            title = "カードを上下に動かす",
+                            points = listOf(
+                                "上へスワイプ：次の項目へ移動",
+                                "下へスワイプ：前の項目へ移動",
+                                "前後のカードも指に合わせて動きます。",
+                            ),
+                        )
+                    }
+                    item {
+                        GuideStep(
+                            icon = "${icons.defer}  ${icons.complete}",
+                            title = "左右で整理する",
+                            points = listOf(
+                                "やること　左：後で行う ／ 右：完了",
+                                "メモ　　　左：しまう ／ 右：やることにする",
+                                "操作後は「元に戻す」が使えます。",
+                            ),
+                        )
+                    }
+                    item {
+                        GuideStep(
+                            icon = "${icons.todo}  ${icons.memo}  ${icons.all}",
+                            title = "画面を切り替える",
+                            points = listOf(
+                                "画面下の項目をタップして切り替えます。",
+                                "設定を有効にすると、空きスペースの左右スワイプでも切り替えられます。",
+                                "「すべて」では、編集・並べ替え・復元ができます。",
+                            ),
+                        )
+                    }
+                    item {
+                        GuideStep(
+                            icon = "${icons.theme}  ${icons.settings}",
+                            title = "外観と操作を調整する",
+                            points = listOf(
+                                "「すべて」画面から、テーマと設定を開けます。",
+                                "色・フォント・アイコン・ボタン配置・動き・触覚などを変更できます。",
+                                "このガイドも設定から見返せます。",
+                            ),
+                        )
+                        Spacer(Modifier.height(20.dp))
+                    }
                 }
             }
             Button(
@@ -476,6 +505,123 @@ private fun GuideStep(icon: String, title: String, points: List<String>) {
                     )
                 }
                 Spacer(Modifier.height(5.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun GuidePractice(
+    icons: jp.oboegaki.core.model.ThemeIcons,
+) {
+    var step by remember { mutableStateOf(0) }
+    var cardTitle by remember { mutableStateOf("サンプルのやること") }
+    var offsetX by remember { mutableFloatStateOf(0f) }
+    var offsetY by remember { mutableFloatStateOf(0f) }
+    val threshold = with(LocalDensity.current) { 48.dp.toPx() }
+
+    fun completeVertical(next: Boolean) {
+        cardTitle = if (next) "次のサンプル" else "前のサンプル"
+        offsetX = 0f
+        offsetY = 0f
+        step = 1
+    }
+
+    fun completeHorizontal(complete: Boolean) {
+        cardTitle = if (complete) "完了したサンプル" else "あとで行うサンプル"
+        offsetX = 0f
+        offsetY = 0f
+        step = 2
+    }
+
+    val practiceColor = when {
+        step == 1 && offsetX > 0f -> LocalThemeColors.current.success
+        step == 1 && offsetX < 0f -> LocalThemeColors.current.defer
+        else -> LocalThemeColors.current.accent
+    }
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(LocalAppTheme.current.mediumCornerDp.dp),
+        elevation = 1.dp,
+        backgroundColor = parseColor(LocalThemeColors.current.surface),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("さわって覚える", style = MaterialTheme.typography.subtitle1, fontWeight = FontWeight.Bold)
+            Text(
+                when (step) {
+                    0 -> "練習用カードを上下どちらかへ動かしてください。実際のデータは変わりません。"
+                    1 -> "次に、カードを左か右へ動かして整理してください。"
+                    else -> "練習できました。いつでも設定から見返せます。"
+                },
+                color = parseColor(LocalThemeColors.current.textSecondary),
+            )
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .offset { IntOffset(offsetX.roundToInt(), offsetY.roundToInt()) }
+                    .pointerInput(step, threshold) {
+                        detectDragGestures(
+                            onDragEnd = {
+                                when {
+                                    step == 0 && abs(offsetY) >= threshold -> completeVertical(offsetY < 0f)
+                                    step == 1 && abs(offsetX) >= threshold -> completeHorizontal(offsetX > 0f)
+                                    else -> {
+                                        offsetX = 0f
+                                        offsetY = 0f
+                                    }
+                                }
+                            },
+                            onDragCancel = {
+                                offsetX = 0f
+                                offsetY = 0f
+                            },
+                        ) { change, dragAmount ->
+                            change.consume()
+                            when (step) {
+                                0 -> offsetY += dragAmount.y
+                                1 -> offsetX += dragAmount.x
+                            }
+                        }
+                    },
+                backgroundColor = parseColor(practiceColor).copy(alpha = .16f),
+                elevation = 0.dp,
+            ) {
+                Text("${icons.todo}  $cardTitle", Modifier.padding(16.dp), fontWeight = FontWeight.Bold)
+            }
+            when (step) {
+                0 -> {
+                    Text("上下の移動", style = MaterialTheme.typography.caption)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { completeVertical(false) }, Modifier.weight(1f).height(52.dp)) {
+                            Text("${icons.previous} 前へ")
+                        }
+                        Button(onClick = { completeVertical(true) }, Modifier.weight(1f).height(52.dp)) {
+                            Text("${icons.next} 次へ")
+                        }
+                    }
+                }
+                1 -> {
+                    Text("左右の整理", style = MaterialTheme.typography.caption)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { completeHorizontal(false) }, Modifier.weight(1f).height(52.dp)) {
+                            Text("${icons.defer} 後で行う")
+                        }
+                        Button(onClick = { completeHorizontal(true) }, Modifier.weight(1f).height(52.dp)) {
+                            Text("${icons.complete} 完了")
+                        }
+                    }
+                }
+                else -> {
+                    Text("カードをタップして編集することもできます。", style = MaterialTheme.typography.caption)
+                    OutlinedButton(onClick = {
+                        step = 0
+                        cardTitle = "サンプルのやること"
+                        offsetX = 0f
+                        offsetY = 0f
+                    }, Modifier.fillMaxWidth().height(48.dp)) {
+                        Text("もう一度練習する")
+                    }
+                }
             }
         }
     }
@@ -787,31 +933,160 @@ private fun ColorField(label: String, value: String, onChange: (String) -> Unit)
 fun DataToolsScreen(controller: AppController) {
     var data by remember { mutableStateOf("") }
     var mode by remember { mutableStateOf("export") }
+    var showAdvanced by remember { mutableStateOf(!controller.backupFilesAvailable) }
+    var inspection by remember { mutableStateOf<BackupInspectionResult?>(null) }
+    var inspectionSource by remember { mutableStateOf<String?>(null) }
+    var showImportConfirmation by remember { mutableStateOf(false) }
     OverlayScaffold("データ", controller::closeOverlay) { padding ->
         LazyColumn(Modifier.fillMaxSize().padding(padding), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             item {
                 Text("バックアップ", style = MaterialTheme.typography.h6)
                 Text("アカウントや通信を使わず、項目・関係・テーマ・設定をJSONにまとめます。")
             }
-            item {
-                Button(onClick = { controller.exportBackup { data = it; mode = "export" } }, Modifier.fillMaxWidth().height(52.dp)) { Text("バックアップを書き出す") }
-                OutlinedButton(onClick = { mode = "import"; data = "" }, Modifier.fillMaxWidth().height(48.dp)) { Text("バックアップを読み込む") }
+            if (controller.backupFilesAvailable) item {
+                Button(onClick = controller::exportBackupFile, Modifier.fillMaxWidth().height(52.dp)) {
+                    Text("ファイルに保存する")
+                }
+                OutlinedButton(
+                    onClick = {
+                        mode = "import"
+                        data = ""
+                        inspection = null
+                        inspectionSource = null
+                        showImportConfirmation = false
+                        controller.importBackupFile { value ->
+                            data = value
+                            controller.inspectBackup(value) { result ->
+                                if (data == value) {
+                                    inspection = result
+                                    inspectionSource = value
+                                }
+                            }
+                        }
+                    },
+                    Modifier.fillMaxWidth().height(52.dp),
+                ) { Text("ファイルから読み込む") }
+                Text(
+                    "保存先・読み込み元は端末のファイル選択画面で選べます。広い範囲の保存権限やアプリ独自の通信は使いません。",
+                    style = MaterialTheme.typography.caption,
+                    color = parseColor(LocalThemeColors.current.textSecondary),
+                )
+            } else item {
+                Text(
+                    "この端末ではファイル選択をまだ利用できないため、下の手動JSON操作を使用してください。",
+                    style = MaterialTheme.typography.caption,
+                    color = parseColor(LocalThemeColors.current.textSecondary),
+                )
             }
             item {
-                OutlinedTextField(
-                    data, { if (mode == "import") data = it }, Modifier.fillMaxWidth(),
-                    label = { Text(if (mode == "import") "バックアップJSONを貼り付け" else "作成したバックアップJSON") },
-                    readOnly = mode != "import", minLines = 12, maxLines = 26,
-                )
-                if (mode == "import") {
-                    Spacer(Modifier.height(10.dp))
-                    Button(onClick = { controller.importBackup(data) }, enabled = data.isNotBlank(), modifier = Modifier.fillMaxWidth().height(52.dp)) {
-                        Text("内容を確認して読み込む")
-                    }
+                OutlinedButton(onClick = { showAdvanced = !showAdvanced }, Modifier.fillMaxWidth().height(48.dp)) {
+                    Text(if (showAdvanced) "手動のJSON操作を閉じる" else "手動のJSON操作（詳しい方法）")
                 }
+            }
+            if (showAdvanced) item {
+                Text(
+                    "通常は上のファイル操作を使ってください。JSONをコピーして保存したい場合だけ利用できます。",
+                    style = MaterialTheme.typography.caption,
+                )
+                OutlinedButton(
+                    onClick = { controller.exportBackup { data = it; mode = "export" } },
+                    Modifier.fillMaxWidth().height(48.dp),
+                ) { Text("JSONを表示する") }
+                OutlinedButton(
+                    onClick = {
+                        mode = "import"
+                        data = ""
+                        inspection = null
+                        inspectionSource = null
+                        showImportConfirmation = false
+                    },
+                    Modifier.fillMaxWidth().height(48.dp),
+                ) { Text("JSONを貼り付ける") }
+                if (mode == "import") {
+                    OutlinedTextField(
+                        data, {
+                            data = it
+                            inspection = null
+                            inspectionSource = null
+                            showImportConfirmation = false
+                        }, Modifier.fillMaxWidth(),
+                        label = { Text("バックアップJSON") },
+                        minLines = 8, maxLines = 20,
+                    )
+                    Button(
+                        onClick = {
+                            val source = data
+                            inspection = null
+                            inspectionSource = null
+                            controller.inspectBackup(source) { result ->
+                                if (data == source) {
+                                    inspection = result
+                                    inspectionSource = source
+                                }
+                            }
+                        },
+                        enabled = data.isNotBlank(),
+                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                    ) { Text("内容を検査する") }
+                } else if (data.isNotBlank()) {
+                    OutlinedTextField(
+                        data, {}, Modifier.fillMaxWidth(),
+                        label = { Text("作成したバックアップJSON") },
+                        readOnly = true, minLines = 8, maxLines = 20,
+                    )
+                }
+            }
+            if (inspection != null && inspectionSource == data) item {
+                when (val result = inspection) {
+                    is BackupInspectionResult.Invalid -> {
+                        Text(result.message, color = MaterialTheme.colors.error)
+                    }
+                    is BackupInspectionResult.Ready -> {
+                        val preview = result.preview
+                        Card(
+                            Modifier.fillMaxWidth(),
+                            backgroundColor = parseColor(LocalThemeColors.current.surface),
+                            elevation = 1.dp,
+                        ) {
+                            Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text("読み込み内容の確認", style = MaterialTheme.typography.subtitle1, fontWeight = FontWeight.Bold)
+                                Text("やること・メモなど: ${preview.itemCount}件")
+                                Text("前後関係: ${preview.relationCount}件")
+                                Text("作成元アプリ: ${preview.backupAppVersion}", style = MaterialTheme.typography.caption)
+                                if (preview.rejectedItems > 0) Text("除外する項目: ${preview.rejectedItems}件")
+                                if (preview.correctionCount > 0) Text("補正する箇所: ${preview.correctionCount}件")
+                                Text("現在のデータ ${preview.currentItemCount}件・前後関係 ${preview.currentRelationCount}件は置き換わります。")
+                                Text("この操作はあとから「元に戻す」で取り消せます。", style = MaterialTheme.typography.caption)
+                                Button(
+                                    onClick = { if (inspectionSource == data) showImportConfirmation = true },
+                                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                                ) { Text("確認して置き換える") }
+                            }
+                        }
+                    }
+                    null -> Unit
+                }
+            }
+            item {
                 Spacer(Modifier.height(80.dp))
             }
         }
+    }
+    if (showImportConfirmation) {
+        AlertDialog(
+            onDismissRequest = { showImportConfirmation = false },
+            title = { Text("データを置き換えますか？") },
+            text = { Text("現在のデータをバックアップの内容で置き換えます。内容を確認してから続けてください。") },
+            confirmButton = {
+                Button(onClick = {
+                    showImportConfirmation = false
+                    controller.importBackup(data)
+                    inspection = null
+                    inspectionSource = null
+                }) { Text("置き換える") }
+            },
+            dismissButton = { TextButton(onClick = { showImportConfirmation = false }) { Text("キャンセル") } },
+        )
     }
 }
 

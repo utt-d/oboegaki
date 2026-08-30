@@ -22,16 +22,19 @@ class MainActivity : ComponentActivity() {
     private val rescheduleScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var notificationItemId by mutableStateOf<String?>(null)
     private var notificationRequestKey by mutableLongStateOf(0L)
+    private lateinit var backupFileGateway: AndroidBackupFileGateway
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         handleNotificationIntent(intent)
         requestPostNotificationsIfNeeded()
         val app = OboegakiApplication.from(this)
+        backupFileGateway = AndroidBackupFileGateway(this)
         setContent {
             OboegakiApp(
                 repository = app.repository,
                 calendarExporter = AndroidCalendarExporter(this@MainActivity),
+                backupFileGateway = backupFileGateway,
                 focusItemId = notificationItemId,
                 focusRequestKey = notificationRequestKey,
             )
