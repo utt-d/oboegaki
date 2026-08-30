@@ -40,7 +40,7 @@ object CalendarRecurrencePolicy {
         if (month !in 1..12 || day !in 1..31 || day > maxDaysInMonth(month)) {
             return CalendarRecurrenceDecision.Unsupported(
                 CalendarRecurrenceUnsupportedReason.INVALID_ANCHOR_DATE,
-                "繧ｫ繝ｬ繝ｳ繝繝ｼ縺ｫ蟄伜惠縺励↑縺・譌･莉倥・螳壽悄險ｭ螳壹↓縺ｯ縺ｧ縺阪∪縺帙ｓ",
+                "カレンダーに存在しない日付の定期設定は追加できません。",
             )
         }
         return when (rule.unit) {

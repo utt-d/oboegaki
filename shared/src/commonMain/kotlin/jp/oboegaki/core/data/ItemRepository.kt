@@ -111,6 +111,11 @@ data class BackupImportResult(
     val message: String,
     val correctedRelations: Int = 0,
     val successful: Boolean = false,
+    val duplicateItemIds: Int = 0,
+    val duplicateRelationIds: Int = 0,
+    val correctedGroupReferences: Int = 0,
+    val correctedParentReferences: Int = 0,
+    val correctedConversionReferences: Int = 0,
 )
 
 @Serializable
@@ -124,9 +129,9 @@ private data class DataSnapshot(
 )
 
 @Serializable
-private data class BackupManifest(
+internal data class BackupManifest(
     val schemaVersion: Int = 4,
-    val appVersion: String = "0.3.0",
+    val appVersion: String = "unknown",
     val createdAtEpochMillis: Long,
 )
 
@@ -139,10 +144,17 @@ private data class BackupEnvelope(
     val settings: AppSettings = AppSettings(),
 )
 
+internal fun createBackupManifest(appVersion: String, createdAtEpochMillis: Long): BackupManifest =
+    BackupManifest(
+        appVersion = appVersion.trim().ifBlank { "unknown" },
+        createdAtEpochMillis = createdAtEpochMillis,
+    )
+
 class RoomItemRepository(
     private val database: AppDatabase,
     private val reminderScheduler: ReminderScheduler = NoOpReminderScheduler,
     private val json: Json = Json { ignoreUnknownKeys = true; encodeDefaults = true; prettyPrint = true },
+    private val appVersion: String = DEFAULT_APP_VERSION,
 ) : ItemRepository {
     private val dao = database.dao()
     private val mutationMutex = Mutex()
@@ -877,7 +889,15 @@ class RoomItemRepository(
         val settings = dao.getSetting(SETTINGS_KEY)?.let {
             runCatching { json.decodeFromString<AppSettings>(it.value) }.getOrNull()
         } ?: AppSettings()
-        return json.encodeToString(BackupEnvelope(BackupManifest(createdAtEpochMillis = now()), state.items, state.relations, themes, settings))
+        return json.encodeToString(
+            BackupEnvelope(
+                createBackupManifest(appVersion, now()),
+                state.items,
+                state.relations,
+                themes,
+                settings,
+            ),
+        )
     }
 
     override suspend fun importBackupJson(value: String): BackupImportResult = mutationMutex.withLock {
@@ -888,13 +908,10 @@ class RoomItemRepository(
             return@withLock BackupImportResult(0, 0, "バックアップの形式を確認できません")
         }
         if (backup.manifest.schemaVersion !in 1..4) return@withLock BackupImportResult(0, 0, "未対応のバックアップ形式です")
-        val basicValid = backup.items.filter { it.title.isNotBlank() && it.title.length <= 200 && it.body.length <= 100_000 }
-        var valid = basicValid
-        valid = valid.map { item ->
-            val placement = GroupPolicy.validatePlacement(item, item.groupId, valid)
+        val basicValid = backup.items.filter(::isBackupItemImportable)
+        val recurrenceSafe = basicValid.map { item ->
             val recurrence = RecurrencePolicy.validate(item)
             RecurrencePolicy.normalize(item.copy(
-                groupId = if (placement is GroupPlacementDecision.Rejected) null else item.groupId,
                 todo = item.todo?.copy(
                     recurrence = if (recurrence is RecurrenceValidation.Invalid) null else item.todo.recurrence,
                     // Backups before 0.3.0 stored the implicit global value
@@ -903,7 +920,9 @@ class RoomItemRepository(
                 ),
             ))
         }
-        val relations = OrderingPolicy.sanitizeRelations(valid, backup.relations)
+        val normalized = normalizeBackupData(recurrenceSafe, backup.relations)
+        val valid = normalized.items
+        val relations = normalized.relations
         val correctedRelations = backup.relations.size - relations.size
         val safeThemes = backup.themes.filter { ThemePolicy.validate(it) is ThemeValidation.Valid }
         val safeSettings = normalizeSettings(backup.settings)
@@ -925,13 +944,26 @@ class RoomItemRepository(
         }
         reconcileReminders(before.items, valid)
         reminderScheduler.applySettings(safeSettings)
-        val correctionMessage = if (correctedRelations > 0) "（前後関係${correctedRelations}件を修正）" else ""
+        val correctionParts = buildList {
+            if (normalized.duplicateItemIds > 0) add("重複したID ${normalized.duplicateItemIds}件")
+            if (normalized.duplicateRelationIds > 0) add("重複した前後関係ID ${normalized.duplicateRelationIds}件")
+            if (normalized.correctedGroupReferences > 0) add("グループ参照 ${normalized.correctedGroupReferences}件")
+            if (normalized.correctedParentReferences > 0) add("親参照 ${normalized.correctedParentReferences}件")
+            if (normalized.correctedConversionReferences > 0) add("変換元参照 ${normalized.correctedConversionReferences}件")
+            if (normalized.correctedRelations > 0) add("前後関係 ${normalized.correctedRelations}件")
+        }
+        val correctionMessage = correctionParts.takeIf { it.isNotEmpty() }?.joinToString("、", prefix = "（補正: ", postfix = "）") ?: ""
         BackupImportResult(
             valid.size,
             backup.items.size - valid.size,
             "${valid.size}件を読み込みました$correctionMessage",
             correctedRelations,
             successful = true,
+            duplicateItemIds = normalized.duplicateItemIds,
+            duplicateRelationIds = normalized.duplicateRelationIds,
+            correctedGroupReferences = normalized.correctedGroupReferences,
+            correctedParentReferences = normalized.correctedParentReferences,
+            correctedConversionReferences = normalized.correctedConversionReferences,
         )
     }
 
@@ -1062,6 +1094,7 @@ class RoomItemRepository(
     }
 
     private companion object {
+        const val DEFAULT_APP_VERSION = "unknown"
         const val SETTINGS_KEY = "app_settings"
         const val NOTIFICATION_UNDO_MILLIS = 10_000L
         const val LEGACY_IMPLICIT_DEFER_ITEMS = 3

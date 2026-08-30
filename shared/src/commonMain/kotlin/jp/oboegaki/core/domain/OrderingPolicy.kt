@@ -233,7 +233,7 @@ object OrderingPolicy {
             ) {
                 return PrerequisiteValidation.Invalid(
                     PrerequisiteRejectionReason.INVALID_PARENT,
-                    "蜑肴署髢｢菫ゅ・隕九▽縺九ｊ縺ｾ縺帙ｓ",
+                    "やることの所属グループを確認できません",
                 )
             }
         }

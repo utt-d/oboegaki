@@ -35,7 +35,11 @@ class OboegakiApplication : Application() {
         initializeNotificationDiagnostics(this)
         database = buildDatabase(databaseBuilder(this))
         reminderScheduler = AndroidReminderScheduler(this)
-        repository = RoomItemRepository(database, reminderScheduler)
+        repository = RoomItemRepository(
+            database = database,
+            reminderScheduler = reminderScheduler,
+            appVersion = BuildConfig.VERSION_NAME,
+        )
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             runCatching { reminderScheduler.applySettings(repository.getSettings()) }
         }

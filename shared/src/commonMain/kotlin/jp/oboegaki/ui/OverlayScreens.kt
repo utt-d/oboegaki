@@ -127,7 +127,11 @@ fun OverlayHost(
             AppOverlay.Themes -> ThemeListScreen(themes, settings, controller)
             is AppOverlay.ThemeEditor -> ThemeEditorScreen(overlay.theme, controller)
             AppOverlay.DataTools -> DataToolsScreen(controller)
-            is AppOverlay.OperationGuide -> OperationGuideScreen(overlay.firstLaunch, controller)
+            is AppOverlay.OperationGuide -> OperationGuideScreen(
+                firstLaunch = overlay.firstLaunch,
+                addButtonPosition = settings.addButtonPosition,
+                controller = controller,
+            )
         }
     }
 }
@@ -146,6 +150,7 @@ private fun AddBottomSheet(
     val density = LocalDensity.current
     var kind by remember { mutableStateOf(defaultKind) }
     var expanded by remember { mutableStateOf(false) }
+    var destinationExpanded by remember { mutableStateOf(false) }
     var dragOffset by remember { mutableFloatStateOf(0f) }
     val closeThreshold = with(density) { 72.dp.toPx() }
     val expandThreshold = with(density) { 36.dp.toPx() }
@@ -158,7 +163,10 @@ private fun AddBottomSheet(
             onDragEnd = {
                 when {
                     dragOffset >= closeThreshold -> controller.closeOverlay()
-                    dragOffset <= -expandThreshold && kind == ItemKind.TODO -> expanded = true
+                    dragOffset <= -expandThreshold && kind == ItemKind.TODO -> {
+                        expanded = true
+                        destinationExpanded = true
+                    }
                 }
                 dragOffset = 0f
             },
@@ -198,7 +206,12 @@ private fun AddBottomSheet(
                         if (it != ItemKind.TODO) expanded = false
                     },
                     expanded = expanded,
-                    onExpandedChange = { expanded = it && kind == ItemKind.TODO },
+                    onExpandedChange = {
+                        expanded = it && kind == ItemKind.TODO
+                        if (it) destinationExpanded = true
+                    },
+                    destinationExpanded = destinationExpanded,
+                    onDestinationExpandedChange = { destinationExpanded = it },
                     handleModifier = handleModifier,
                     sections = sections,
                     settings = settings,
@@ -241,6 +254,8 @@ private fun AddScreen(
     onKindChange: (ItemKind) -> Unit,
     expanded: Boolean,
     onExpandedChange: (Boolean) -> Unit,
+    destinationExpanded: Boolean,
+    onDestinationExpandedChange: (Boolean) -> Unit,
     handleModifier: Modifier,
     sections: AllSections,
     settings: AppSettings,
@@ -361,14 +376,49 @@ private fun AddScreen(
                 )
             }
             item {
-                Text("追加先", style = MaterialTheme.typography.subtitle1)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    KindChoice("あとで分ける", ItemKind.UNSORTED, kind, onKindChange)
-                    KindChoice("やること", ItemKind.TODO, kind, onKindChange)
-                    KindChoice("メモ", ItemKind.MEMO, kind, onKindChange)
+                Button(
+                    onClick = ::submit,
+                    enabled = text.isNotBlank() && (recurrenceUnit == null || scheduled != null),
+                    modifier = Modifier.fillMaxWidth().height(54.dp),
+                ) { Text("追加する") }
+            }
+            item {
+                val destinationSummary = when (kind) {
+                    ItemKind.UNSORTED -> "あとで分ける"
+                    ItemKind.TODO -> "やること"
+                    ItemKind.MEMO -> "メモ"
+                }.let { base ->
+                    groupId?.let { selectedGroupId ->
+                        val groupTitle = allItems.firstOrNull { it.id == selectedGroupId && it.isGroup }?.title
+                        if (groupTitle.isNullOrBlank()) "$base（グループを確認できません）"
+                        else "$base（${groupTitle}）"
+                    } ?: base
+                }
+                OutlinedButton(
+                    onClick = { onDestinationExpandedChange(!destinationExpanded) },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 54.dp),
+                ) {
+                    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.Start) {
+                        Text("追加先: $destinationSummary")
+                        Text(
+                            if (destinationExpanded) "種類やグループを閉じる" else "種類やグループを変更する",
+                            style = MaterialTheme.typography.caption,
+                            color = parseColor(LocalThemeColors.current.textSecondary),
+                        )
+                    }
                 }
             }
-            if (kind != ItemKind.UNSORTED) {
+            if (destinationExpanded) {
+                item {
+                    Text("追加先", style = MaterialTheme.typography.subtitle1)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        KindChoice("あとで分ける", ItemKind.UNSORTED, kind, onKindChange)
+                        KindChoice("やること", ItemKind.TODO, kind, onKindChange)
+                        KindChoice("メモ", ItemKind.MEMO, kind, onKindChange)
+                    }
+                }
+            }
+            if (destinationExpanded && kind != ItemKind.UNSORTED) {
                 item {
                     GroupPicker(
                         title = "入れるグループ",
@@ -460,15 +510,7 @@ private fun AddScreen(
                     )
                 }
             }
-            item {
-                Button(
-                    onClick = ::submit,
-                    enabled = text.isNotBlank() && (recurrenceUnit == null || scheduled != null),
-                    modifier = Modifier.fillMaxWidth().height(54.dp),
-                ) {
-                    Text("追加する")
-                }
-            }
+            item { Spacer(Modifier.height(12.dp)) }
         }
     }
 }

@@ -69,6 +69,7 @@ fun TodoScreen(
     items: List<AppItem>,
     focusedIndex: Int,
     hapticsEnabled: Boolean,
+    operationGuideSeen: Boolean,
     addButtonPosition: AddButtonPosition,
     addButtonBottomOffsetDp: Int,
     controller: AppController,
@@ -88,6 +89,7 @@ fun TodoScreen(
         onDown = controller::previousTodo,
         onEdit = { controller.openEdit(it.id) },
         hapticsEnabled = hapticsEnabled,
+        operationGuideSeen = operationGuideSeen,
         addButtonPosition = addButtonPosition,
         addButtonBottomOffsetDp = addButtonBottomOffsetDp,
     )
@@ -98,6 +100,7 @@ fun MemoScreen(
     items: List<AppItem>,
     focusedIndex: Int,
     hapticsEnabled: Boolean,
+    operationGuideSeen: Boolean,
     addButtonPosition: AddButtonPosition,
     addButtonBottomOffsetDp: Int,
     controller: AppController,
@@ -117,6 +120,7 @@ fun MemoScreen(
         onDown = controller::previousMemo,
         onEdit = { controller.openEdit(it.id) },
         hapticsEnabled = hapticsEnabled,
+        operationGuideSeen = operationGuideSeen,
         addButtonPosition = addButtonPosition,
         addButtonBottomOffsetDp = addButtonBottomOffsetDp,
     )
@@ -137,6 +141,7 @@ private fun SwipeDeck(
     onDown: () -> Unit,
     onEdit: (AppItem) -> Unit,
     hapticsEnabled: Boolean,
+    operationGuideSeen: Boolean,
     addButtonPosition: AddButtonPosition,
     addButtonBottomOffsetDp: Int,
 ) {
@@ -232,7 +237,13 @@ private fun SwipeDeck(
         Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
             Text("${safeIndex + 1} / ${items.size}", style = MaterialTheme.typography.caption, color = parseColor(tokens.textSecondary))
             Spacer(Modifier.height(10.dp))
-            SwipeOperationGuide(leftLabel, rightLabel, leftIcon, rightIcon)
+            SwipeOperationGuide(
+                leftLabel,
+                rightLabel,
+                leftIcon,
+                rightIcon,
+                compact = operationGuideSeen,
+            )
             Spacer(Modifier.height(8.dp))
             val verticalOffset = if (axis == DragAxis.VERTICAL) {
                 dragY.coerceIn(-verticalTransitionPx, verticalTransitionPx)
@@ -626,26 +637,49 @@ private fun lerpDp(start: Dp, end: Dp, progress: Float): Dp =
     lerpFloat(start.value, end.value, progress).dp
 
 @Composable
-private fun SwipeOperationGuide(leftLabel: String, rightLabel: String, leftIcon: String, rightIcon: String) {
+private fun SwipeOperationGuide(
+    leftLabel: String,
+    rightLabel: String,
+    leftIcon: String,
+    rightIcon: String,
+    compact: Boolean,
+) {
     val tokens = LocalThemeColors.current
+    val guideStrength = (0.72f + LocalAppTheme.current.guideReveal.coerceIn(.5f, 1f) * .28f)
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().alpha(guideStrength),
         shape = RoundedCornerShape(LocalAppTheme.current.smallCornerDp.dp),
         elevation = 0.dp,
         backgroundColor = parseColor(tokens.surfaceAlt),
     ) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 7.dp)) {
-            Text(
-                "カードをスワイプ",
-                modifier = Modifier.fillMaxWidth(),
-                textAlign = TextAlign.Center,
-                style = MaterialTheme.typography.overline,
-                color = parseColor(tokens.textSecondary),
-            )
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        if (compact) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Text("$leftIcon $leftLabel", Modifier.weight(1f), style = MaterialTheme.typography.caption)
-                Text("${LocalAppTheme.current.icons.next} 次へ ・ 前へ ${LocalAppTheme.current.icons.previous}", Modifier.weight(1f), textAlign = TextAlign.Center, style = MaterialTheme.typography.caption)
+                Text(
+                    "${LocalAppTheme.current.icons.next} 次へ  ${LocalAppTheme.current.icons.previous} 前へ",
+                    Modifier.weight(1f),
+                    textAlign = TextAlign.Center,
+                    style = MaterialTheme.typography.caption,
+                )
                 Text("$rightLabel $rightIcon", Modifier.weight(1f), textAlign = TextAlign.End, style = MaterialTheme.typography.caption)
+            }
+        } else {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 7.dp)) {
+                Text(
+                    "カードをスワイプ",
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = TextAlign.Center,
+                    style = MaterialTheme.typography.overline,
+                    color = parseColor(tokens.textSecondary),
+                )
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("$leftIcon $leftLabel", Modifier.weight(1f), style = MaterialTheme.typography.caption)
+                    Text("${LocalAppTheme.current.icons.next} 次へ ・ 前へ ${LocalAppTheme.current.icons.previous}", Modifier.weight(1f), textAlign = TextAlign.Center, style = MaterialTheme.typography.caption)
+                    Text("$rightLabel $rightIcon", Modifier.weight(1f), textAlign = TextAlign.End, style = MaterialTheme.typography.caption)
+                }
             }
         }
     }

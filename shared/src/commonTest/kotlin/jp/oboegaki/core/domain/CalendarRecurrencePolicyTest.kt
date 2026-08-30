@@ -53,6 +53,7 @@ class CalendarRecurrencePolicyTest {
 
         assertIs<CalendarRecurrenceDecision.Unsupported>(result)
         assertEquals(CalendarRecurrenceUnsupportedReason.INVALID_ANCHOR_DATE, result.reason)
+        assertEquals("カレンダーに存在しない日付の定期設定は追加できません。", result.message)
     }
 
     @Test

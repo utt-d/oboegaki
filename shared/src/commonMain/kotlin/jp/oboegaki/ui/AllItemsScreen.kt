@@ -57,7 +57,7 @@ fun AllItemsScreen(
     controller: AppController,
 ) {
     val expanded = remember { mutableStateMapOf(
-        "unsorted" to true, "todos" to true, "memos" to true, "completed" to true, "archived" to true,
+        "unsorted" to true, "todos" to true, "memos" to true, "completed" to false, "archived" to false,
     ) }
     val collapsedGroups = remember { mutableStateMapOf<String, Boolean>() }
     val todoActive = remember(sections.todoGroups, sections.todos, relations, collapsedGroups.toMap()) {

@@ -331,6 +331,7 @@ class OrderingPolicyTest {
 
         assertIs<PrerequisiteValidation.Invalid>(result)
         assertEquals(PrerequisiteRejectionReason.INVALID_PARENT, result.reason)
+        assertEquals("やることの所属グループを確認できません", result.message)
     }
 
     @Test
