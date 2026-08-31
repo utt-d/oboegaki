@@ -1,6 +1,5 @@
 package jp.oboegaki.ui
 
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -96,11 +95,9 @@ fun OboegakiApp(
     val latestTabState = rememberUpdatedState(tab)
     val latestTabOrderState = rememberUpdatedState(tabOrder)
     val tabSwipeThreshold = with(LocalDensity.current) { 56.dp.toPx() }
-    val tabTransitionDuration = if (settings.reducedMotion) {
-        1
-    } else {
-        (220 * theme.animationScale).roundToInt().coerceAtLeast(1)
-    }
+    val motionDisabled = settings.reducedMotion ||
+        theme.motionStrength == jp.oboegaki.core.model.MotionStrength.NONE
+    val tabTransitionDuration = MotionAnimation.duration(220, theme.animationScale, motionDisabled)
     val hapticFeedback = LocalHapticFeedback.current
     var tabOffset by remember { mutableFloatStateOf(0f) }
     var tabViewportWidth by remember { mutableIntStateOf(0) }
@@ -129,9 +126,9 @@ fun OboegakiApp(
     }
 
     fun transitionDuration(distancePx: Float): Int {
-        if (settings.reducedMotion || tabViewportWidth <= 0) return 1
+        if (motionDisabled || tabViewportWidth <= 0) return 1
         val pages = (distancePx / tabViewportWidth).coerceAtLeast(.05f)
-        return (tabTransitionDuration * pages).roundToInt().coerceAtLeast(1)
+        return (tabTransitionDuration * pages).roundToInt().coerceAtLeast(90)
     }
 
     fun animateToTab(target: MainTab) {
@@ -154,7 +151,7 @@ fun OboegakiApp(
                 animate(
                     initialValue = startOffset,
                     targetValue = targetOffset,
-                    animationSpec = tween(transitionDuration(distance), easing = LinearEasing),
+                    animationSpec = tween(transitionDuration(distance), easing = MotionAnimation.settleEasing),
                 ) { value, _ -> tabOffset = value }
                 if (
                     generation != tabTransitionGeneration ||
@@ -191,7 +188,7 @@ fun OboegakiApp(
                 animate(
                     initialValue = startOffset,
                     targetValue = targetOffset,
-                    animationSpec = tween(transitionDuration(remaining), easing = LinearEasing),
+                    animationSpec = tween(transitionDuration(remaining), easing = MotionAnimation.settleEasing),
                 ) { value, _ -> tabOffset = value }
                 if (
                     generation != tabTransitionGeneration ||

@@ -7,7 +7,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -157,9 +156,7 @@ private fun AddBottomSheet(
     val theme = LocalAppTheme.current
     val motionDisabled = settings.reducedMotion ||
         theme.motionStrength == jp.oboegaki.core.model.MotionStrength.NONE
-    val transitionDuration = if (motionDisabled) 1 else {
-        (220 * theme.animationScale).roundToInt().coerceAtLeast(1)
-    }
+    val transitionDuration = MotionAnimation.duration(220, theme.animationScale, motionDisabled)
     var kind by remember { mutableStateOf(defaultKind) }
     var expanded by remember { mutableStateOf(false) }
     var destinationExpanded by remember { mutableStateOf(false) }
@@ -206,13 +203,13 @@ private fun AddBottomSheet(
         AnimatedVisibility(
             visibleState = visible,
             enter = slideInVertically(
-                animationSpec = tween(transitionDuration, easing = LinearEasing),
+                animationSpec = tween(transitionDuration, easing = MotionAnimation.settleEasing),
                 initialOffsetY = { it },
-            ) + fadeIn(animationSpec = tween(transitionDuration, easing = LinearEasing)),
+            ) + fadeIn(animationSpec = tween(transitionDuration, easing = MotionAnimation.settleEasing)),
             exit = slideOutVertically(
-                animationSpec = tween(transitionDuration, easing = LinearEasing),
+                animationSpec = tween(transitionDuration, easing = MotionAnimation.settleEasing),
                 targetOffsetY = { it },
-            ) + fadeOut(animationSpec = tween(transitionDuration, easing = LinearEasing)),
+            ) + fadeOut(animationSpec = tween(transitionDuration, easing = MotionAnimation.settleEasing)),
         ) {
             Surface(
                 modifier = Modifier

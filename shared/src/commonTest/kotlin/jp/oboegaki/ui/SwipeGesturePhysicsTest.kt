@@ -86,4 +86,11 @@ class SwipeGesturePhysicsTest {
         assertEquals(1, SwipeGesturePhysics.settleDuration(180, 0f, 500f))
         assertTrue(SwipeGesturePhysics.settleDuration(180, 50f, 500f) < 180)
     }
+
+    @Test
+    fun normalCancellationKeepsAVisibleMinimumDuration() {
+        assertTrue(SwipeGesturePhysics.settleDuration(180, 50f, 500f) >= 90)
+        assertEquals(1, MotionAnimation.duration(220, 1f, disabled = true))
+        assertEquals(1, MotionAnimation.duration(220, 0f, disabled = false))
+    }
 }

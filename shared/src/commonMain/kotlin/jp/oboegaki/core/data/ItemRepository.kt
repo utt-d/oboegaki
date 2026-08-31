@@ -1,7 +1,5 @@
 package jp.oboegaki.core.data
 
-import androidx.room.immediateTransaction
-import androidx.room.useWriterConnection
 import jp.oboegaki.core.domain.DeferDecision
 import jp.oboegaki.core.domain.DeferConfiguration
 import jp.oboegaki.core.domain.DeferPolicy
@@ -12,16 +10,13 @@ import jp.oboegaki.core.domain.OrderingPolicy
 import jp.oboegaki.core.domain.PrerequisiteValidation
 import jp.oboegaki.core.domain.RecurrencePolicy
 import jp.oboegaki.core.domain.RecurrenceValidation
-import jp.oboegaki.core.domain.ReminderPolicy
 import jp.oboegaki.core.domain.SplitPolicy
 import jp.oboegaki.core.domain.SplitValidation
-import jp.oboegaki.core.domain.ThemePolicy
 import jp.oboegaki.core.domain.ThemeValidation
 import jp.oboegaki.core.domain.UndoEligibility
 import jp.oboegaki.core.domain.UndoOperation
 import jp.oboegaki.core.domain.UndoPolicy
 import jp.oboegaki.core.domain.UndoRestoreScope
-import jp.oboegaki.core.model.AllSections
 import jp.oboegaki.core.model.AppItem
 import jp.oboegaki.core.model.AppSettings
 import jp.oboegaki.core.model.ItemKind
@@ -38,13 +33,8 @@ import jp.oboegaki.platform.NoOpReminderScheduler
 import jp.oboegaki.platform.Reminder
 import jp.oboegaki.platform.ReminderScheduler
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
-import kotlin.random.Random
-import kotlin.time.Clock
 
 class RoomItemRepository(
     private val database: AppDatabase,
@@ -52,62 +42,28 @@ class RoomItemRepository(
     private val json: Json = Json { ignoreUnknownKeys = true; encodeDefaults = true; prettyPrint = true },
     private val appVersion: String = DEFAULT_APP_VERSION,
 ) : ItemRepository {
-    private val dao = database.dao()
-    private val mutationMutex = Mutex()
-    private val backupCodec = BackupCodec(json, appVersion)
+    private val runtime = RoomRepositoryRuntime(database, reminderScheduler, json, appVersion)
+    private val settingsStore = RoomSettingsStore(runtime)
+    private val themeStore = RoomThemeStore(runtime)
+    private val backupStore = RoomBackupStore(runtime)
+    private val queryStore = RoomItemQueryStore(runtime)
+    private val dao get() = runtime.dao
+    private val mutationMutex get() = runtime.mutationMutex
 
-    private val itemModels: Flow<List<AppItem>> = combine(
-        dao.observeItems(), dao.observeTodoDetails(),
-    ) { items, details ->
-        val detailById = details.associateBy { it.itemId }
-        items.map { it.toModel(detailById[it.id]) }
-    }
+    override fun observeRelations(): Flow<List<ItemRelation>> = queryStore.observeRelations()
 
-    override fun observeRelations(): Flow<List<ItemRelation>> =
-        dao.observeRelations().map { values -> values.map(ItemRelationEntity::toModel) }
+    override fun observeAllSections() = queryStore.observeAllSections()
 
-    override fun observeAllSections(): Flow<AllSections> = combine(
-        itemModels, observeRelations(),
-    ) { items, relations ->
-        val activeTodos = OrderingPolicy.canonicalSort(
-            items.filter { it.kind == ItemKind.TODO && it.lifecycle == ItemLifecycle.ACTIVE && !it.isGroup },
-            relations,
-        )
-        AllSections(
-            unsorted = items.filter { it.kind == ItemKind.UNSORTED && it.lifecycle == ItemLifecycle.ACTIVE }
-                .sortedBy { it.manualRank },
-            todos = activeTodos,
-            todoGroups = items.filter { it.kind == ItemKind.TODO && it.lifecycle == ItemLifecycle.ACTIVE && it.isGroup }
-                .sortedBy { it.manualRank },
-            memos = items.filter { it.kind == ItemKind.MEMO && it.lifecycle == ItemLifecycle.ACTIVE }
-                .filterNot { it.isGroup }
-                .sortedBy { it.manualRank },
-            memoGroups = items.filter { it.kind == ItemKind.MEMO && it.lifecycle == ItemLifecycle.ACTIVE && it.isGroup }
-                .sortedBy { it.manualRank },
-            completed = items.filter { it.kind == ItemKind.TODO && it.lifecycle == ItemLifecycle.COMPLETED }
-                .sortedByDescending { it.completedAtEpochMillis },
-            archived = items.filter { it.kind == ItemKind.MEMO && it.lifecycle == ItemLifecycle.ARCHIVED }
-                .sortedByDescending { it.archivedAtEpochMillis },
-        )
-    }
+    override fun observeActiveTodos() = queryStore.observeActiveTodos()
+    override fun observeActiveMemos() = queryStore.observeActiveMemos()
 
-    override fun observeActiveTodos(): Flow<List<AppItem>> = observeAllSections().map { it.todos }
-    override fun observeActiveMemos(): Flow<List<AppItem>> = observeAllSections().map { it.memos }
+    override fun observeThemes(): Flow<List<ThemeDefinition>> = themeStore.observe()
 
-    override fun observeThemes(): Flow<List<ThemeDefinition>> = dao.observeThemes().map { rows ->
-        BuiltInThemes.all + rows.mapNotNull { runCatching { json.decodeFromString<ThemeDefinition>(it.json) }.getOrNull() }
-    }
+    override fun observeSettings(): Flow<AppSettings> = settingsStore.observe()
 
-    override fun observeSettings(): Flow<AppSettings> = dao.observeSetting(SETTINGS_KEY).map { row ->
-        normalizeSettings(
-            row?.let { runCatching { json.decodeFromString<AppSettings>(it.value) }.getOrNull() } ?: AppSettings(),
-        )
-    }
+    override suspend fun getItem(id: String): AppItem? = queryStore.getItem(id)
 
-    override suspend fun getItem(id: String): AppItem? =
-        dao.getItem(id)?.toModel(dao.getTodoDetail(id))
-
-    override suspend fun getSettings(): AppSettings = readSettings()
+    override suspend fun getSettings(): AppSettings = settingsStore.read()
 
     override suspend fun quickAdd(kind: ItemKind, text: String, groupId: String?): AppItem? = mutationMutex.withLock {
         val clean = text.trim()
@@ -238,31 +194,6 @@ class RoomItemRepository(
             val children = stateForValidation.items.filter { it.groupId == clean.id }
             require(children.all { it.kind == clean.kind }) { "中の項目と異なる種類には変更できません" }
         }
-        /*
-        if (false) {
-            val state = currentState()
-            require(validPrerequisites(requiredBeforeIds, clean, state.items, allowCurrent = true)) {
-                "前提にできるのは既存の有効なやることだけです"
-            }
-            val unrelated = state.relations.filterNot { it.toItemId == clean.id && it.type == RelationType.REQUIRED_BEFORE }
-            requiredBeforeIds.forEach { prerequisiteId ->
-                if (OrderingPolicy.wouldCreateCycle(unrelated, prerequisiteId, clean.id)) {
-                    throw IllegalArgumentException("前後関係が循環するため保存できません")
-                }
-            }
-            mutateLocked("UPDATE") {
-                upsert(clean)
-                dao.deleteRequiredPrerequisites(clean.id)
-                requiredBeforeIds.forEach { prerequisiteId ->
-                    dao.upsertRelation(ItemRelation(
-                        id = newId(), fromItemId = prerequisiteId, toItemId = clean.id,
-                        type = RelationType.REQUIRED_BEFORE,
-                        createdAtEpochMillis = now(),
-                    ).toEntity())
-                }
-            }
-        }
-        */
         val current = currentState()
         val prospectiveItems = current.items.filterNot { it.id == clean.id } + clean
         val safeExistingRelations = OrderingPolicy.sanitizeRelations(current.items, current.relations)
@@ -765,236 +696,50 @@ class RoomItemRepository(
         reminderScheduler.reconcileAll(state.items.mapNotNull(::toReminder), staleIds)
     }
 
-    override suspend fun saveSettings(settings: AppSettings) = mutationMutex.withLock {
-        val safe = normalizeSettings(settings)
-        dao.upsertSetting(SettingEntity(SETTINGS_KEY, json.encodeToString(safe)))
-        reminderScheduler.applySettings(safe)
-    }
+    override suspend fun saveSettings(settings: AppSettings) = settingsStore.save(settings)
 
-    override suspend fun saveTheme(theme: ThemeDefinition): ThemeValidation = mutationMutex.withLock {
-        val validation = ThemePolicy.validate(theme)
-        if (validation is ThemeValidation.Valid) {
-            val custom = theme.copy(builtIn = false)
-            dao.upsertTheme(ThemeEntity(custom.id, custom.name, false, json.encodeToString(custom), now()))
-        }
-        validation
-    }
+    override suspend fun saveTheme(theme: ThemeDefinition): ThemeValidation = themeStore.save(theme)
 
-    override suspend fun deleteTheme(id: String) = mutationMutex.withLock { dao.deleteCustomTheme(id) }
+    override suspend fun deleteTheme(id: String) = themeStore.delete(id)
 
-    override suspend fun exportBackupJson(): String = mutationMutex.withLock {
-        val state = currentState()
-        val themes = dao.getThemes().mapNotNull { runCatching { json.decodeFromString<ThemeDefinition>(it.json) }.getOrNull() }
-        val settings = dao.getSetting(SETTINGS_KEY)?.let {
-            runCatching { json.decodeFromString<AppSettings>(it.value) }.getOrNull()
-        } ?: AppSettings()
-        backupCodec.encode(state, themes, settings, now())
-    }
+    override suspend fun exportBackupJson(): String = backupStore.exportJson()
 
-    override suspend fun inspectBackupJson(value: String): BackupInspectionResult = mutationMutex.withLock {
-        when (val result = backupCodec.prepare(value)) {
-            is BackupPreflight.Invalid -> BackupInspectionResult.Invalid(result.message)
-            is BackupPreflight.Ready -> {
-                val current = currentState()
-                val prepared = result.value
-                BackupInspectionResult.Ready(
-                    BackupInspection(
-                        itemCount = prepared.validItems.size,
-                        relationCount = prepared.relations.size,
-                        rejectedItems = prepared.rejectedItems,
-                        duplicateItemIds = prepared.normalized.duplicateItemIds,
-                        duplicateRelationIds = prepared.normalized.duplicateRelationIds,
-                        correctedGroupReferences = prepared.normalized.correctedGroupReferences,
-                        correctedParentReferences = prepared.normalized.correctedParentReferences,
-                        correctedConversionReferences = prepared.normalized.correctedConversionReferences,
-                        correctedRelations = prepared.normalized.correctedRelations,
-                        backupAppVersion = prepared.envelope.manifest.appVersion,
-                        currentItemCount = current.items.size,
-                        currentRelationCount = current.relations.size,
-                    ),
-                )
-            }
-        }
-    }
+    override suspend fun inspectBackupJson(value: String): BackupInspectionResult = backupStore.inspectJson(value)
 
-    override suspend fun importBackupJson(value: String): BackupImportResult = mutationMutex.withLock {
-        val prepared = when (val result = backupCodec.prepare(value)) {
-            is BackupPreflight.Invalid -> return@withLock BackupImportResult(0, 0, result.message)
-            is BackupPreflight.Ready -> result.value
-        }
-        val valid = prepared.validItems
-        val relations = prepared.relations
-        val normalized = prepared.normalized
-        val safeThemes = prepared.safeThemes
-        val safeSettings = prepared.safeSettings
-        val before = currentState()
-        val time = now()
-        database.inTransaction {
-            dao.upsertOperation(OperationEntity(newId(), "IMPORT", time, time + 10_000, json.encodeToString(before), null))
-            dao.clearRelations()
-            dao.clearTodoDetails()
-            dao.clearItems()
-            valid.forEach { upsert(it) }
-            dao.upsertRelations(relations.map(ItemRelation::toEntity))
-            dao.clearCustomThemes()
-            safeThemes.forEach { theme ->
-                val custom = theme.copy(builtIn = false)
-                dao.upsertTheme(ThemeEntity(custom.id, custom.name, false, json.encodeToString(custom), time))
-            }
-            dao.upsertSetting(SettingEntity(SETTINGS_KEY, json.encodeToString(safeSettings)))
-        }
-        reconcileReminders(before.items, valid)
-        reminderScheduler.applySettings(safeSettings)
-        val correctionParts = buildList {
-            if (normalized.duplicateItemIds > 0) add("重複したID ${normalized.duplicateItemIds}件")
-            if (normalized.duplicateRelationIds > 0) add("重複した前後関係ID ${normalized.duplicateRelationIds}件")
-            if (normalized.correctedGroupReferences > 0) add("グループ参照 ${normalized.correctedGroupReferences}件")
-            if (normalized.correctedParentReferences > 0) add("親参照 ${normalized.correctedParentReferences}件")
-            if (normalized.correctedConversionReferences > 0) add("変換元参照 ${normalized.correctedConversionReferences}件")
-            if (normalized.correctedRelations > 0) add("前後関係 ${normalized.correctedRelations}件")
-        }
-        val correctionMessage = correctionParts.takeIf { it.isNotEmpty() }?.joinToString("、", prefix = "（補正: ", postfix = "）") ?: ""
-        BackupImportResult(
-            valid.size,
-            prepared.rejectedItems,
-            "${valid.size}件を読み込みました$correctionMessage",
-            normalized.correctedRelations,
-            successful = true,
-            duplicateItemIds = normalized.duplicateItemIds,
-            duplicateRelationIds = normalized.duplicateRelationIds,
-            correctedGroupReferences = normalized.correctedGroupReferences,
-            correctedParentReferences = normalized.correctedParentReferences,
-            correctedConversionReferences = normalized.correctedConversionReferences,
-        )
-    }
+    override suspend fun importBackupJson(value: String): BackupImportResult = backupStore.importJson(value)
 
-    /** Must only be called while mutationMutex is held. */
-    private suspend fun mutateLocked(type: String, block: suspend RoomItemRepository.() -> Unit): String {
-        val before = currentState()
-        val time = now()
-        val operationId = newId()
-        database.inTransaction {
-            block()
-            dao.upsertOperation(OperationEntity(
-                operationId = operationId, type = type, createdAtEpochMillis = time,
-                expiresAtEpochMillis = time + 10_000,
-                payloadJson = json.encodeToString(before), revertedAtEpochMillis = null,
-            ))
-            dao.trimOperations()
-        }
-        return operationId
-    }
+    // Thin compatibility helpers keep the command implementation readable;
+    // storage, journaling, IDs and reminders are owned by the runtime.
+    private suspend fun mutateLocked(type: String, block: suspend RoomItemRepository.() -> Unit): String =
+        runtime.mutateLocked(type) { this@RoomItemRepository.block() }
 
-    private suspend fun currentState(): DataSnapshot {
-        val details = dao.getTodoDetails().associateBy { it.itemId }
-        return DataSnapshot(
-            items = dao.getItems().map { it.toModel(details[it.id]) },
-            relations = dao.getRelations().map(ItemRelationEntity::toModel),
-            customThemes = dao.getThemes().mapNotNull { row ->
-                runCatching { json.decodeFromString<ThemeDefinition>(row.json) }.getOrNull()
-            },
-            settings = readSettings(),
-        )
-    }
+    private suspend fun currentState(): DataSnapshot = runtime.currentState()
 
     private suspend fun restoreSnapshot(
         snapshot: DataSnapshot,
         time: Long,
         restoreSettingsAndThemes: Boolean,
-    ) {
-        val safeItems = snapshot.items.map { item ->
-            if (item.groupId != null &&
-                GroupPolicy.validatePlacement(item, item.groupId, snapshot.items) !is GroupPlacementDecision.Allowed
-            ) item.copy(groupId = null) else item
-        }
-        val safeRelations = OrderingPolicy.sanitizeRelations(safeItems, snapshot.relations)
-        dao.clearRelations()
-        dao.clearTodoDetails()
-        dao.clearItems()
-        safeItems.forEach { upsert(it) }
-        dao.upsertRelations(safeRelations.map(ItemRelation::toEntity))
-        if (restoreSettingsAndThemes) snapshot.customThemes?.let { themes ->
-            dao.clearCustomThemes()
-            themes.forEach { theme ->
-                val custom = theme.copy(builtIn = false)
-                dao.upsertTheme(ThemeEntity(custom.id, custom.name, false, json.encodeToString(custom), time))
-            }
-        }
-        if (restoreSettingsAndThemes) snapshot.settings?.let { settings ->
-            dao.upsertSetting(SettingEntity(SETTINGS_KEY, json.encodeToString(normalizeSettings(settings))))
-        }
-    }
+    ) = runtime.restoreSnapshot(snapshot, time, restoreSettingsAndThemes)
 
-    private suspend fun readSettings(): AppSettings = normalizeSettings(
-        dao.getSetting(SETTINGS_KEY)?.let { row ->
-            runCatching { json.decodeFromString<AppSettings>(row.value) }.getOrNull()
-        } ?: AppSettings(),
-    )
+    private suspend fun upsert(item: AppItem) = runtime.upsert(item)
 
-    private suspend fun upsert(item: AppItem) {
-        dao.upsertItem(item.toEntity())
-        item.todo?.let { dao.upsertTodoDetail(it.toEntity(item.id)) }
-        if (item.todo == null) dao.getTodoDetail(item.id)?.let { dao.deleteTodoDetail(it) }
-    }
+    private fun newId(): String = runtime.newId()
 
-    private fun newId(): String = buildString {
-        append(now().toString(16))
-        append('-')
-        append(Random.nextLong().toString(16))
-    }
+    private fun now(): Long = runtime.now()
 
-    private fun now(): Long = Clock.System.now().toEpochMilliseconds()
+    private suspend fun syncReminder(item: AppItem) = runtime.syncReminder(item)
 
-    private suspend fun syncReminder(item: AppItem) {
-        val reminder = toReminder(item)
-        if (reminder == null) reminderScheduler.cancel(item.id) else reminderScheduler.schedule(reminder)
-    }
+    private fun toReminder(item: AppItem): Reminder? = runtime.toReminder(item)
 
-    private fun toReminder(item: AppItem): Reminder? {
-        val scheduled = item.todo?.scheduledAtEpochMillis ?: return null
-        if (!ReminderPolicy.isEligible(item, now())) return null
-        return Reminder(item.id, item.title, scheduled, item.revision)
-    }
+    private suspend fun insertPrerequisites(itemId: String, prerequisiteIds: Set<String>, time: Long) =
+        runtime.insertPrerequisites(itemId, prerequisiteIds, time)
 
-    private fun validPrerequisites(
-        prerequisiteIds: Set<String>,
-        item: AppItem,
-        items: List<AppItem>,
-        allowCurrent: Boolean = false,
-    ): Boolean {
-        if (item.kind != ItemKind.TODO && prerequisiteIds.isNotEmpty()) return false
-        val activeTodoIds = items.asSequence()
-            .filter { it.kind == ItemKind.TODO && it.lifecycle == ItemLifecycle.ACTIVE }
-            .map { it.id }
-            .toSet()
-        return prerequisiteIds.all { it in activeTodoIds && (allowCurrent || it != item.id) }
-    }
-
-    private suspend fun insertPrerequisites(itemId: String, prerequisiteIds: Set<String>, time: Long) {
-        prerequisiteIds.forEach { prerequisiteId ->
-            dao.upsertRelation(ItemRelation(
-                id = newId(),
-                fromItemId = prerequisiteId,
-                toItemId = itemId,
-                type = RelationType.REQUIRED_BEFORE,
-                createdAtEpochMillis = time,
-            ).toEntity())
-        }
-    }
-
-    private suspend fun reconcileReminders(previous: List<AppItem>, restored: List<AppItem>) {
-        val staleIds = previous.asSequence()
-            .filter { it.kind == ItemKind.TODO && !it.isGroup && it.todo?.scheduledAtEpochMillis != null }
-            .map { it.id }
-            .toSet()
-        reminderScheduler.reconcileAll(restored.mapNotNull(::toReminder), staleIds)
-    }
+    private suspend fun reconcileReminders(previous: List<AppItem>, restored: List<AppItem>) =
+        runtime.reconcileReminders(previous, restored)
 
     private companion object {
         const val DEFAULT_APP_VERSION = "unknown"
-        const val SETTINGS_KEY = "app_settings"
         const val NOTIFICATION_UNDO_MILLIS = 10_000L
-        const val LEGACY_IMPLICIT_DEFER_ITEMS = 3
     }
 }
 
@@ -1005,6 +750,3 @@ private fun OperationEntity.toUndoOperation(): UndoOperation = UndoOperation(
     expiresAtEpochMillis = expiresAtEpochMillis,
     revertedAtEpochMillis = revertedAtEpochMillis,
 )
-
-private suspend fun <T> AppDatabase.inTransaction(block: suspend () -> T): T =
-    useWriterConnection { connection -> connection.immediateTransaction { block() } }

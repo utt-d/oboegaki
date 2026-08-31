@@ -1,7 +1,6 @@
 package jp.oboegaki.ui
 
 import androidx.compose.animation.core.animate
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -209,8 +208,9 @@ private fun SwipeDeck(
                 }
                 val startX = dragX
                 val startY = dragY
-                val baseDuration = if (reducedMotion || theme.motionStrength == jp.oboegaki.core.model.MotionStrength.NONE) 1
-                else (180 * theme.animationScale).roundToInt().coerceAtLeast(1)
+                val motionDisabled = reducedMotion ||
+                    theme.motionStrength == jp.oboegaki.core.model.MotionStrength.NONE
+                val baseDuration = MotionAnimation.duration(180, theme.animationScale, motionDisabled)
                 val remainingDistance = when (result) {
                     SwipeResult.RIGHT, SwipeResult.LEFT -> abs(targetX - startX)
                     SwipeResult.UP, SwipeResult.DOWN -> abs(targetY - startY)
@@ -221,7 +221,7 @@ private fun SwipeDeck(
                     SwipeResult.UP, SwipeResult.DOWN -> verticalTransitionPx
                 }
                 val duration = SwipeGesturePhysics.settleDuration(baseDuration, remainingDistance, fullDistance)
-                animate(0f, 1f, animationSpec = tween(duration, easing = LinearEasing)) { value, _ ->
+                animate(0f, 1f, animationSpec = tween(duration, easing = MotionAnimation.settleEasing)) { value, _ ->
                     dragX = startX + (targetX - startX) * value
                     dragY = startY + (targetY - startY) * value
                 }
@@ -610,11 +610,11 @@ private fun MorphingDeckCard(
     val theme = LocalAppTheme.current
     val safeHighlightProgress = highlightProgress.coerceIn(0f, 1f)
     val borderColor = lerpColor(parseColor(tokens.border), parseColor(tokens.focusRing), safeHighlightProgress)
-    val safeDetailAlpha = if (item == null) 0f else detailAlpha.coerceIn(0f, 1f)
-    val safePreviewAlpha = if (item == null) 1f else previewAlpha.coerceIn(0f, 1f)
-    val contentDifference = safeDetailAlpha - safePreviewAlpha
-    val detailContentAlpha = (contentDifference * 8f).coerceIn(0f, 1f)
-    val previewContentAlpha = (-contentDifference * 8f).coerceIn(0f, 1f)
+    val contentAlpha = morphingDeckAlpha(item != null, detailAlpha, previewAlpha)
+    val safeDetailAlpha = contentAlpha.detail
+    val safePreviewAlpha = contentAlpha.preview
+    val detailContentAlpha = safeDetailAlpha
+    val previewContentAlpha = safePreviewAlpha
     Card(
         modifier = Modifier
             .fillMaxWidth(widthFraction.coerceIn(.1f, 1f))

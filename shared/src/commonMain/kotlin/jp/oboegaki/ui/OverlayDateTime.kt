@@ -7,7 +7,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -224,6 +223,10 @@ private fun CalendarDatePickerDialog(
     val density = LocalDensity.current
     val touchSlop = with(density) { 8.dp.toPx() }
     val distanceThreshold = with(density) { 56.dp.toPx() }
+    val theme = LocalAppTheme.current
+    val motionDisabled = reducedMotion ||
+        theme.motionStrength == jp.oboegaki.core.model.MotionStrength.NONE
+    val monthSettleDuration = MotionAnimation.duration(200, theme.animationScale, motionDisabled)
 
     fun monthAt(amount: Int): Pair<Int, Int>? {
         val shifted = DatePickerPolicy.shiftMonth(year, month, amount)
@@ -306,7 +309,7 @@ private fun CalendarDatePickerDialog(
                                             dragging = false
                                             horizontalDrag = 0f
                                             verticalDrag = 0f
-                                        } else if (reducedMotion) {
+                                        } else if (motionDisabled) {
                                             updateMonth(direction)
                                             dragging = false
                                             horizontalDrag = 0f
@@ -316,7 +319,10 @@ private fun CalendarDatePickerDialog(
                                             val target = if (direction > 0) -width else width
                                             settleJob = settleScope.launch {
                                                 settleOffset.snapTo(horizontalDrag)
-                                                settleOffset.animateTo(target, tween(200, easing = LinearEasing))
+                                                settleOffset.animateTo(
+                                                    target,
+                                                    tween(monthSettleDuration, easing = MotionAnimation.settleEasing),
+                                                )
                                                 updateMonth(direction)
                                                 settleOffset.snapTo(0f)
                                                 horizontalDrag = 0f

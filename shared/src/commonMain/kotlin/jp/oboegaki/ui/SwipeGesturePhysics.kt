@@ -1,7 +1,6 @@
 package jp.oboegaki.ui
 
 import kotlin.math.abs
-import kotlin.math.roundToInt
 
 internal enum class DragAxis { HORIZONTAL, VERTICAL }
 
@@ -41,9 +40,7 @@ internal object SwipeGesturePhysics {
         (rawDistance * follow.coerceIn(.1f, 1f)).coerceIn(-limit, limit)
 
     fun settleDuration(baseDurationMillis: Int, remainingDistance: Float, fullDistance: Float): Int {
-        if (baseDurationMillis <= 1 || remainingDistance <= .5f) return 1
-        val progress = (remainingDistance / fullDistance.coerceAtLeast(1f)).coerceIn(.2f, 1f)
-        return (baseDurationMillis * progress).roundToInt().coerceAtLeast(1)
+        return MotionAnimation.settleDuration(baseDurationMillis, remainingDistance, fullDistance)
     }
 
     private fun direction(
