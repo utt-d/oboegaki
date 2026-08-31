@@ -242,13 +242,13 @@ fun OboegakiApp(
                                     when (button) {
                                         TopActionButton.THEMES -> TextButton(onClick = controller::openThemes) {
                                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                                ThemeIcon(icons.theme, ThemeIcons().theme, AppIcons.theme, "テーマ")
+                                                ThemeIcon(icons.theme, ThemeIcons().theme, AppIcons.theme, null)
                                                 Text("テーマ")
                                             }
                                         }
                                         TopActionButton.SETTINGS -> TextButton(onClick = controller::openSettings) {
                                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                                ThemeIcon(icons.settings, ThemeIcons().settings, AppIcons.settings, "設定")
+                                                ThemeIcon(icons.settings, ThemeIcons().settings, AppIcons.settings, null)
                                                 Text("設定")
                                             }
                                         }
@@ -273,17 +273,17 @@ fun OboegakiApp(
                             when (button) {
                                 MainNavigationButton.TODOS -> BottomNavItem(
                                     "やること",
-                                    { ThemeIcon(icons.todo, ThemeIcons().todo, AppIcons.todo, "やること") },
+                                    { ThemeIcon(icons.todo, ThemeIcons().todo, AppIcons.todo, null) },
                                     tab == MainTab.TODOS,
                                 ) { animateToTab(MainTab.TODOS) }
                                 MainNavigationButton.MEMOS -> BottomNavItem(
                                     "メモ",
-                                    { ThemeIcon(icons.memo, ThemeIcons().memo, AppIcons.memo, "メモ") },
+                                    { ThemeIcon(icons.memo, ThemeIcons().memo, AppIcons.memo, null) },
                                     tab == MainTab.MEMOS,
                                 ) { animateToTab(MainTab.MEMOS) }
                                 MainNavigationButton.ALL -> BottomNavItem(
                                     "すべて",
-                                    { ThemeIcon(icons.all, ThemeIcons().all, AppIcons.all, "すべて") },
+                                    { ThemeIcon(icons.all, ThemeIcons().all, AppIcons.all, null) },
                                     tab == MainTab.ALL,
                                 ) { animateToTab(MainTab.ALL) }
                             }

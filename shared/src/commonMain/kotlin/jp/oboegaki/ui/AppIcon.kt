@@ -51,8 +51,8 @@ fun ThemeIcon(
     if (value == defaultValue) {
         Icon(imageVector, contentDescription, modifier, tint)
     } else {
-        val semanticsModifier = if (contentDescription == null) Modifier else {
-            Modifier.clearAndSetSemantics { this.contentDescription = contentDescription }
+        val semanticsModifier = Modifier.clearAndSetSemantics {
+            if (contentDescription != null) this.contentDescription = contentDescription
         }
         Box(
             modifier = modifier.size(24.dp).then(semanticsModifier),

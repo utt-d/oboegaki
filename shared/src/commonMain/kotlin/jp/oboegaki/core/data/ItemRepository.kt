@@ -37,159 +37,14 @@ import jp.oboegaki.core.model.NotificationUndoToken
 import jp.oboegaki.platform.NoOpReminderScheduler
 import jp.oboegaki.platform.Reminder
 import jp.oboegaki.platform.ReminderScheduler
-import jp.oboegaki.platform.BACKUP_MAX_BYTES
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlin.random.Random
 import kotlin.time.Clock
-
-interface ItemRepository {
-    fun observeActiveTodos(): Flow<List<AppItem>>
-    fun observeActiveMemos(): Flow<List<AppItem>>
-    fun observeAllSections(): Flow<AllSections>
-    fun observeRelations(): Flow<List<ItemRelation>>
-    fun observeThemes(): Flow<List<ThemeDefinition>>
-    fun observeSettings(): Flow<AppSettings>
-    suspend fun getItem(id: String): AppItem?
-    suspend fun getSettings(): AppSettings
-    suspend fun quickAdd(kind: ItemKind, text: String, groupId: String? = null): AppItem?
-    suspend fun addDetailed(
-        kind: ItemKind,
-        title: String,
-        body: String,
-        groupId: String?,
-        detail: TodoDetail?,
-        requiredBeforeIds: Set<String> = emptySet(),
-    ): AppItem?
-    suspend fun createGroup(
-        kind: ItemKind,
-        title: String,
-        groupId: String?,
-        detail: TodoDetail?,
-        requiredBeforeIds: Set<String> = emptySet(),
-    ): AppItem?
-    suspend fun save(item: AppItem, requiredBeforeIds: Set<String>? = null): AppItem
-    suspend fun delete(id: String)
-    suspend fun complete(id: String)
-    suspend fun defer(id: String, configuration: DeferConfiguration): DeferDecision?
-    suspend fun defer(id: String, threshold: Int): DeferDecision? = defer(
-        id,
-        DeferConfiguration(defaultItems = threshold, splitThreshold = threshold, splitSuggestionEnabled = true),
-    )
-    suspend fun convertMemo(id: String): AppItem?
-    suspend fun archiveMemo(id: String)
-    suspend fun restore(id: String)
-    suspend fun validateMove(id: String, destinationIndex: Int): MoveDecision
-    suspend fun move(id: String, destinationIndex: Int): MoveDecision
-    suspend fun moveFree(id: String, destinationIndex: Int)
-    suspend fun moveWithinGroup(id: String, direction: Int): MoveDecision
-    suspend fun split(id: String, titles: List<String>): SplitValidation
-    suspend fun postponeSplitPrompt(id: String, threshold: Int)
-    suspend fun disableSplitPrompt(id: String)
-    suspend fun undo(): Boolean
-    suspend fun performNotificationAction(
-        action: NotificationAction,
-        itemId: String,
-        expectedRevision: Long? = null,
-    ): NotificationActionResult
-    suspend fun undoNotification(token: NotificationUndoToken): NotificationUndoResult
-    suspend fun rescheduleAllReminders()
-    suspend fun saveSettings(settings: AppSettings)
-    suspend fun saveTheme(theme: ThemeDefinition): ThemeValidation
-    suspend fun deleteTheme(id: String)
-    suspend fun exportBackupJson(): String
-    suspend fun inspectBackupJson(value: String): BackupInspectionResult
-    suspend fun importBackupJson(value: String): BackupImportResult
-}
-
-sealed interface BackupInspectionResult {
-    data class Ready(val preview: BackupInspection) : BackupInspectionResult
-    data class Invalid(val message: String) : BackupInspectionResult
-}
-
-data class BackupInspection(
-    val itemCount: Int,
-    val relationCount: Int,
-    val rejectedItems: Int,
-    val duplicateItemIds: Int,
-    val duplicateRelationIds: Int,
-    val correctedGroupReferences: Int,
-    val correctedParentReferences: Int,
-    val correctedConversionReferences: Int,
-    val correctedRelations: Int,
-    val backupAppVersion: String,
-    val currentItemCount: Int,
-    val currentRelationCount: Int,
-) {
-    val correctionCount: Int
-        get() = duplicateItemIds + duplicateRelationIds + correctedGroupReferences +
-            correctedParentReferences + correctedConversionReferences + correctedRelations
-}
-
-data class BackupImportResult(
-    val importedItems: Int,
-    val rejectedItems: Int,
-    val message: String,
-    val correctedRelations: Int = 0,
-    val successful: Boolean = false,
-    val duplicateItemIds: Int = 0,
-    val duplicateRelationIds: Int = 0,
-    val correctedGroupReferences: Int = 0,
-    val correctedParentReferences: Int = 0,
-    val correctedConversionReferences: Int = 0,
-)
-
-@Serializable
-private data class DataSnapshot(
-    val items: List<AppItem>,
-    val relations: List<ItemRelation>,
-    // Nullable defaults preserve themes/settings when decoding an operation
-    // snapshot written before those fields existed.
-    val customThemes: List<ThemeDefinition>? = null,
-    val settings: AppSettings? = null,
-)
-
-@Serializable
-internal data class BackupManifest(
-    val schemaVersion: Int = 4,
-    val appVersion: String = "unknown",
-    val createdAtEpochMillis: Long,
-)
-
-@Serializable
-private data class BackupEnvelope(
-    val manifest: BackupManifest,
-    val items: List<AppItem>,
-    val relations: List<ItemRelation>,
-    val themes: List<ThemeDefinition> = emptyList(),
-    val settings: AppSettings = AppSettings(),
-)
-
-private data class PreparedBackup(
-    val envelope: BackupEnvelope,
-    val validItems: List<AppItem>,
-    val relations: List<ItemRelation>,
-    val safeThemes: List<ThemeDefinition>,
-    val safeSettings: AppSettings,
-    val rejectedItems: Int,
-    val normalized: BackupNormalizationResult,
-)
-
-private sealed interface BackupPreflight {
-    data class Ready(val value: PreparedBackup) : BackupPreflight
-    data class Invalid(val message: String) : BackupPreflight
-}
-
-internal fun createBackupManifest(appVersion: String, createdAtEpochMillis: Long): BackupManifest =
-    BackupManifest(
-        appVersion = appVersion.trim().ifBlank { "unknown" },
-        createdAtEpochMillis = createdAtEpochMillis,
-    )
 
 class RoomItemRepository(
     private val database: AppDatabase,
@@ -199,6 +54,7 @@ class RoomItemRepository(
 ) : ItemRepository {
     private val dao = database.dao()
     private val mutationMutex = Mutex()
+    private val backupCodec = BackupCodec(json, appVersion)
 
     private val itemModels: Flow<List<AppItem>> = combine(
         dao.observeItems(), dao.observeTodoDetails(),
@@ -243,7 +99,9 @@ class RoomItemRepository(
     }
 
     override fun observeSettings(): Flow<AppSettings> = dao.observeSetting(SETTINGS_KEY).map { row ->
-        row?.let { runCatching { json.decodeFromString<AppSettings>(it.value) }.getOrNull() } ?: AppSettings()
+        normalizeSettings(
+            row?.let { runCatching { json.decodeFromString<AppSettings>(it.value) }.getOrNull() } ?: AppSettings(),
+        )
     }
 
     override suspend fun getItem(id: String): AppItem? =
@@ -930,19 +788,11 @@ class RoomItemRepository(
         val settings = dao.getSetting(SETTINGS_KEY)?.let {
             runCatching { json.decodeFromString<AppSettings>(it.value) }.getOrNull()
         } ?: AppSettings()
-        json.encodeToString(
-            BackupEnvelope(
-                createBackupManifest(appVersion, now()),
-                state.items,
-                state.relations,
-                themes,
-                settings,
-            ),
-        )
+        backupCodec.encode(state, themes, settings, now())
     }
 
     override suspend fun inspectBackupJson(value: String): BackupInspectionResult = mutationMutex.withLock {
-        when (val result = prepareBackup(value)) {
+        when (val result = backupCodec.prepare(value)) {
             is BackupPreflight.Invalid -> BackupInspectionResult.Invalid(result.message)
             is BackupPreflight.Ready -> {
                 val current = currentState()
@@ -968,7 +818,7 @@ class RoomItemRepository(
     }
 
     override suspend fun importBackupJson(value: String): BackupImportResult = mutationMutex.withLock {
-        val prepared = when (val result = prepareBackup(value)) {
+        val prepared = when (val result = backupCodec.prepare(value)) {
             is BackupPreflight.Invalid -> return@withLock BackupImportResult(0, 0, result.message)
             is BackupPreflight.Ready -> result.value
         }
@@ -1015,42 +865,6 @@ class RoomItemRepository(
             correctedGroupReferences = normalized.correctedGroupReferences,
             correctedParentReferences = normalized.correctedParentReferences,
             correctedConversionReferences = normalized.correctedConversionReferences,
-        )
-    }
-
-    private fun prepareBackup(value: String): BackupPreflight {
-        if (value.encodeToByteArray().size > BACKUP_MAX_BYTES) {
-            return BackupPreflight.Invalid("50MBを超えるバックアップは読み込めません")
-        }
-        val backup = runCatching { json.decodeFromString<BackupEnvelope>(value) }.getOrElse {
-            return BackupPreflight.Invalid("バックアップの形式を確認できません")
-        }
-        if (backup.manifest.schemaVersion !in 1..4) {
-            return BackupPreflight.Invalid("未対応のバックアップ形式です")
-        }
-        val basicValid = backup.items.filter(::isBackupItemImportable)
-        val recurrenceSafe = basicValid.map { item ->
-            val recurrence = RecurrencePolicy.validate(item)
-            RecurrencePolicy.normalize(item.copy(
-                todo = item.todo?.copy(
-                    recurrence = if (recurrence is RecurrenceValidation.Invalid) null else item.todo.recurrence,
-                    // Backups before 0.3.0 stored the implicit global value
-                    // as a per-item override. Restore inheritance on import.
-                    deferValue = item.todo.deferValue?.takeUnless { it == LEGACY_IMPLICIT_DEFER_ITEMS },
-                ),
-            ))
-        }
-        val normalized = normalizeBackupData(recurrenceSafe, backup.relations)
-        return BackupPreflight.Ready(
-            PreparedBackup(
-                envelope = backup,
-                validItems = normalized.items,
-                relations = normalized.relations,
-                safeThemes = backup.themes.filter { ThemePolicy.validate(it) is ThemeValidation.Valid },
-                safeSettings = normalizeSettings(backup.settings),
-                rejectedItems = backup.items.size - basicValid.size,
-                normalized = normalized,
-            ),
         )
     }
 
@@ -1111,15 +925,11 @@ class RoomItemRepository(
         }
     }
 
-    private fun normalizeSettings(settings: AppSettings): AppSettings = settings.copy(
-        splitThreshold = settings.splitThreshold.coerceIn(1, 10),
-        deferItems = settings.deferItems.coerceIn(1, 20),
-        undoSeconds = settings.undoSeconds.coerceIn(3, 10),
+    private suspend fun readSettings(): AppSettings = normalizeSettings(
+        dao.getSetting(SETTINGS_KEY)?.let { row ->
+            runCatching { json.decodeFromString<AppSettings>(row.value) }.getOrNull()
+        } ?: AppSettings(),
     )
-
-    private suspend fun readSettings(): AppSettings = dao.getSetting(SETTINGS_KEY)?.let { row ->
-        runCatching { json.decodeFromString<AppSettings>(row.value) }.getOrNull()
-    } ?: AppSettings()
 
     private suspend fun upsert(item: AppItem) {
         dao.upsertItem(item.toEntity())

@@ -148,8 +148,8 @@ private fun ThemeListCard(
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        ThemeIcon(theme.icons.todo, ThemeIcons().todo, AppIcons.todo, "やること", tint = parseColor(colors.textPrimary))
-                        ThemeIcon(theme.icons.memo, ThemeIcons().memo, AppIcons.memo, "メモ", tint = parseColor(colors.textPrimary))
+                        ThemeIcon(theme.icons.todo, ThemeIcons().todo, AppIcons.todo, null, tint = parseColor(colors.textPrimary))
+                        ThemeIcon(theme.icons.memo, ThemeIcons().memo, AppIcons.memo, null, tint = parseColor(colors.textPrimary))
                         Spacer(Modifier.width(4.dp))
                         Text(
                             theme.name,
@@ -172,7 +172,7 @@ private fun ThemeListCard(
                 if (selected) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("適用中", color = parseColor(colors.accent))
-                        AppIcon(AppIcons.complete, "適用中", tint = parseColor(colors.accent))
+                        AppIcon(AppIcons.complete, null, tint = parseColor(colors.accent))
                     }
                 } else {
                     Text("選ぶ", color = parseColor(colors.accent))
@@ -336,7 +336,7 @@ private fun LiveThemePreview(theme: ThemeDefinition, colors: ThemeColors) {
         ) {
             Column(Modifier.padding(16.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    ThemeIcon(theme.icons.todo, ThemeIcons().todo, AppIcons.todo, "やること", tint = parseColor(colors.textPrimary))
+                    ThemeIcon(theme.icons.todo, ThemeIcons().todo, AppIcons.todo, null, tint = parseColor(colors.textPrimary))
                     Spacer(Modifier.width(4.dp))
                     Text("見積書の金額を確認する", color = parseColor(colors.textPrimary), fontWeight = FontWeight(theme.headingWeight), fontFamily = fontFamily)
                 }
@@ -344,13 +344,13 @@ private fun LiveThemePreview(theme: ThemeDefinition, colors: ThemeColors) {
                 Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Box(Modifier.weight(1f).background(parseColor(colors.defer), RoundedCornerShape(theme.smallCornerDp.dp)).padding(10.dp)) {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-                            ThemeIcon(theme.icons.defer, ThemeIcons().defer, AppIcons.defer, "後で行う", tint = Color.White)
+                            ThemeIcon(theme.icons.defer, ThemeIcons().defer, AppIcons.defer, null, tint = Color.White)
                             Text("後で行う", color = Color.White, fontFamily = fontFamily)
                         }
                     }
                     Box(Modifier.weight(1f).background(parseColor(colors.success), RoundedCornerShape(theme.smallCornerDp.dp)).padding(10.dp)) {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-                            ThemeIcon(theme.icons.complete, ThemeIcons().complete, AppIcons.complete, "完了", tint = Color.White)
+                            ThemeIcon(theme.icons.complete, ThemeIcons().complete, AppIcons.complete, null, tint = Color.White)
                             Text("完了", color = Color.White, fontFamily = fontFamily)
                         }
                     }

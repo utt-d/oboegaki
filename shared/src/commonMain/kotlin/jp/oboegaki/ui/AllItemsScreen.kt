@@ -250,9 +250,9 @@ private fun AllItemRow(
                         contentAlignment = Alignment.Center,
                     ) {
                         if (item.isGroup) {
-                            AppIcon(AppIcons.group, "グループ", tint = itemKindColor(item))
+                            AppIcon(AppIcons.group, null, tint = itemKindColor(item))
                         } else {
-                            ThemeIcon(LocalAppTheme.current.icons.all, ThemeIcons().all, AppIcons.all, "項目", tint = itemKindColor(item))
+                            ThemeIcon(LocalAppTheme.current.icons.all, ThemeIcons().all, AppIcons.all, null, tint = itemKindColor(item))
                         }
                     }
                 } else if (!(item.isGroup && grouped.hasChildren)) {
@@ -266,7 +266,7 @@ private fun AllItemRow(
                 }
                 TextButton(onClick = { controller.openEdit(item.id) }, modifier = Modifier.height(48.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        ThemeIcon(theme.icons.edit, ThemeIcons().edit, AppIcons.edit, "編集")
+                        ThemeIcon(theme.icons.edit, ThemeIcons().edit, AppIcons.edit, null)
                         Text("編集")
                     }
                 }

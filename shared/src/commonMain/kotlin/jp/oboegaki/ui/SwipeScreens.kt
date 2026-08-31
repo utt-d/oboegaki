@@ -498,7 +498,7 @@ private fun SwipeDeck(
                     .height(48.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    ThemeIcon(theme.icons.edit, ThemeIcons().edit, AppIcons.edit, "編集")
+                    ThemeIcon(theme.icons.edit, ThemeIcons().edit, AppIcons.edit, null)
                     Spacer(Modifier.width(4.dp))
                     Text("編集")
                 }
@@ -536,13 +536,13 @@ private fun HorizontalGuide(
     ) {
         Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
             if (revealRight) {
-                ThemeIcon(rightIcon, rightDefault, rightVector, rightLabel, tint = Color.White)
+                ThemeIcon(rightIcon, rightDefault, rightVector, null, tint = Color.White)
                 Spacer(Modifier.width(8.dp))
                 Text(rightLabel, color = Color.White, fontWeight = FontWeight.Bold)
             } else {
                 Text(leftLabel, color = Color.White, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.width(8.dp))
-                ThemeIcon(leftIcon, leftDefault, leftVector, leftLabel, tint = Color.White)
+                ThemeIcon(leftIcon, leftDefault, leftVector, null, tint = Color.White)
             }
         }
     }
@@ -577,7 +577,7 @@ private fun ItemCardContent(item: AppItem) {
                             LocalAppTheme.current.icons.defer,
                             ThemeIcons().defer,
                             AppIcons.defer,
-                            "後で行う",
+                            null,
                             tint = parseColor(tokens.defer),
                         )
                         Spacer(Modifier.width(4.dp))
@@ -686,7 +686,7 @@ private fun PreviewCardContent(
                 directionMark,
                 if (isNext) ThemeIcons().next else ThemeIcons().previous,
                 if (isNext) AppIcons.next else AppIcons.previous,
-                positionLabel,
+                null,
                 tint = borderColor,
             )
         }
@@ -754,11 +754,11 @@ private fun SwipeOperationGuide(
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     SwipeGuideLabel(leftIcon, leftDefault, leftVector, leftLabel, Modifier.weight(1f))
                     Row(Modifier.weight(1f), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-                        ThemeIcon(LocalAppTheme.current.icons.next, ThemeIcons().next, AppIcons.next, "次へ")
+                        ThemeIcon(LocalAppTheme.current.icons.next, ThemeIcons().next, AppIcons.next, null)
                         Text("次へ", style = MaterialTheme.typography.caption)
                         Text("・", style = MaterialTheme.typography.caption)
                         Text("前へ", style = MaterialTheme.typography.caption)
-                        ThemeIcon(LocalAppTheme.current.icons.previous, ThemeIcons().previous, AppIcons.previous, "前へ")
+                        ThemeIcon(LocalAppTheme.current.icons.previous, ThemeIcons().previous, AppIcons.previous, null)
                     }
                     SwipeGuideLabel(rightIcon, rightDefault, rightVector, rightLabel, Modifier.weight(1f), end = true)
                 }
@@ -787,13 +787,13 @@ private fun SwipeGuideLabel(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (!end) {
-            ThemeIcon(value, defaultValue, vector, label)
+            ThemeIcon(value, defaultValue, vector, null)
             Spacer(Modifier.width(3.dp))
         }
         Text(label, style = MaterialTheme.typography.caption)
         if (end) {
             Spacer(Modifier.width(3.dp))
-            ThemeIcon(value, defaultValue, vector, label)
+            ThemeIcon(value, defaultValue, vector, null)
         }
     }
 }

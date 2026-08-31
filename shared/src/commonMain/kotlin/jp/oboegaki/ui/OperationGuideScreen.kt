@@ -107,7 +107,7 @@ fun OperationGuideScreen(
                 }
                 item {
                     GuideStep(
-                        icon = { ThemeIcon(icons.add, ThemeIcons().add, AppIcons.add, "追加") },
+                        icon = { ThemeIcon(icons.add, ThemeIcons().add, AppIcons.add, null) },
                         title = "まず追加する",
                         points = listOf(
                             "画面${addButtonLocation}下の追加ボタンを押します。",
@@ -126,9 +126,9 @@ fun OperationGuideScreen(
                         GuideStep(
                             icon = {
                                 Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                                    ThemeIcon(icons.memo, ThemeIcons().memo, AppIcons.memo, "メモ")
-                                    ThemeIcon(icons.defer, ThemeIcons().defer, AppIcons.defer, "後で行う")
-                                    ThemeIcon(icons.complete, ThemeIcons().complete, AppIcons.complete, "完了")
+                                    ThemeIcon(icons.memo, ThemeIcons().memo, AppIcons.memo, null)
+                                    ThemeIcon(icons.defer, ThemeIcons().defer, AppIcons.defer, null)
+                                    ThemeIcon(icons.complete, ThemeIcons().complete, AppIcons.complete, null)
                                 }
                             },
                             title = "これだけ覚えれば始められます",
@@ -145,8 +145,8 @@ fun OperationGuideScreen(
                         GuideStep(
                             icon = {
                                 Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                                    ThemeIcon(icons.previous, ThemeIcons().previous, AppIcons.previous, "前へ")
-                                    ThemeIcon(icons.next, ThemeIcons().next, AppIcons.next, "次へ")
+                                    ThemeIcon(icons.previous, ThemeIcons().previous, AppIcons.previous, null)
+                                    ThemeIcon(icons.next, ThemeIcons().next, AppIcons.next, null)
                                 }
                             },
                             title = "カードを上下に動かす",
@@ -161,8 +161,8 @@ fun OperationGuideScreen(
                         GuideStep(
                             icon = {
                                 Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                                    ThemeIcon(icons.defer, ThemeIcons().defer, AppIcons.defer, "後で行う")
-                                    ThemeIcon(icons.complete, ThemeIcons().complete, AppIcons.complete, "完了")
+                                    ThemeIcon(icons.defer, ThemeIcons().defer, AppIcons.defer, null)
+                                    ThemeIcon(icons.complete, ThemeIcons().complete, AppIcons.complete, null)
                                 }
                             },
                             title = "左右で整理する",
@@ -177,9 +177,9 @@ fun OperationGuideScreen(
                         GuideStep(
                             icon = {
                                 Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                                    ThemeIcon(icons.todo, ThemeIcons().todo, AppIcons.todo, "やること")
-                                    ThemeIcon(icons.memo, ThemeIcons().memo, AppIcons.memo, "メモ")
-                                    ThemeIcon(icons.all, ThemeIcons().all, AppIcons.all, "すべて")
+                                    ThemeIcon(icons.todo, ThemeIcons().todo, AppIcons.todo, null)
+                                    ThemeIcon(icons.memo, ThemeIcons().memo, AppIcons.memo, null)
+                                    ThemeIcon(icons.all, ThemeIcons().all, AppIcons.all, null)
                                 }
                             },
                             title = "画面を切り替える",
@@ -194,8 +194,8 @@ fun OperationGuideScreen(
                         GuideStep(
                             icon = {
                                 Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                                    ThemeIcon(icons.theme, ThemeIcons().theme, AppIcons.theme, "テーマ")
-                                    ThemeIcon(icons.settings, ThemeIcons().settings, AppIcons.settings, "設定")
+                                    ThemeIcon(icons.theme, ThemeIcons().theme, AppIcons.theme, null)
+                                    ThemeIcon(icons.settings, ThemeIcons().settings, AppIcons.settings, null)
                                 }
                             },
                             title = "外観と操作を調整する",
@@ -324,7 +324,7 @@ private fun GuidePractice(
                 elevation = 0.dp,
             ) {
                 Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    ThemeIcon(icons.todo, ThemeIcons().todo, AppIcons.todo, "やること")
+                    ThemeIcon(icons.todo, ThemeIcons().todo, AppIcons.todo, null)
                     Spacer(Modifier.width(6.dp))
                     Text(cardTitle, fontWeight = FontWeight.Bold)
                 }
@@ -335,13 +335,13 @@ private fun GuidePractice(
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(onClick = { completeVertical(false) }, Modifier.weight(1f).height(52.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                ThemeIcon(icons.previous, ThemeIcons().previous, AppIcons.previous, "前へ")
+                                ThemeIcon(icons.previous, ThemeIcons().previous, AppIcons.previous, null)
                                 Text("前へ")
                             }
                         }
                         Button(onClick = { completeVertical(true) }, Modifier.weight(1f).height(52.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                ThemeIcon(icons.next, ThemeIcons().next, AppIcons.next, "次へ")
+                                ThemeIcon(icons.next, ThemeIcons().next, AppIcons.next, null)
                                 Text("次へ")
                             }
                         }
@@ -352,13 +352,13 @@ private fun GuidePractice(
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(onClick = { completeHorizontal(false) }, Modifier.weight(1f).height(52.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                ThemeIcon(icons.defer, ThemeIcons().defer, AppIcons.defer, "後で行う")
+                                ThemeIcon(icons.defer, ThemeIcons().defer, AppIcons.defer, null)
                                 Text("後で行う")
                             }
                         }
                         Button(onClick = { completeHorizontal(true) }, Modifier.weight(1f).height(52.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                ThemeIcon(icons.complete, ThemeIcons().complete, AppIcons.complete, "完了")
+                                ThemeIcon(icons.complete, ThemeIcons().complete, AppIcons.complete, null)
                                 Text("完了")
                             }
                         }

@@ -267,7 +267,7 @@ fun SettingsScreen(settings: AppSettings, controller: AppController) {
                             LocalAppTheme.current.icons.all,
                             ThemeIcons().all,
                             AppIcons.all,
-                            "操作ガイド",
+                            null,
                         )
                         Spacer(Modifier.width(4.dp))
                         Text("操作ガイドを見る")

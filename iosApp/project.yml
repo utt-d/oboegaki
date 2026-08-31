@@ -7,7 +7,7 @@ settings:
   base:
     PRODUCT_NAME: Oboegaki
     PRODUCT_BUNDLE_IDENTIFIER: jp.oboegaki.app
-    MARKETING_VERSION: 0.3.5
+    MARKETING_VERSION: 0.3.6
     CURRENT_PROJECT_VERSION: 2
     SWIFT_VERSION: 5.0
 targets:
