@@ -31,4 +31,21 @@ class ThemePolicyTest {
         assertIs<ThemeValidation.Invalid>(ThemePolicy.validate(customized.copy(fontFamily = "Unknown Font")))
         assertIs<ThemeValidation.Invalid>(ThemePolicy.validate(customized.copy(icons = customized.icons.copy(add = ""))))
     }
+
+    @Test
+    fun iconLengthLimitMatchesEditableGlyphsAndEmoji() {
+        val base = BuiltInThemes.standard.copy(id = "icon-length")
+        assertIs<ThemeValidation.Valid>(
+            ThemePolicy.validate(base.copy(icons = base.icons.copy(add = "12345678"))),
+        )
+        assertIs<ThemeValidation.Invalid>(
+            ThemePolicy.validate(base.copy(icons = base.icons.copy(add = "123456789"))),
+        )
+        assertIs<ThemeValidation.Valid>(
+            ThemePolicy.validate(base.copy(icons = base.icons.copy(add = "📝📝📝📝"))),
+        )
+        assertIs<ThemeValidation.Invalid>(
+            ThemePolicy.validate(base.copy(icons = base.icons.copy(add = "📝📝📝📝📝"))),
+        )
+    }
 }

@@ -48,8 +48,8 @@ android {
         applicationId = "jp.oboegaki.app"
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
-        versionCode = 13
-        versionName = "0.3.4"
+        versionCode = 14
+        versionName = "0.3.5"
     }
     signingConfigs {
         if (hasReleaseSigning) create("release") {

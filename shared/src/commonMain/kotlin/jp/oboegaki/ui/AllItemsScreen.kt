@@ -47,6 +47,7 @@ import jp.oboegaki.core.model.AppItem
 import jp.oboegaki.core.model.ItemKind
 import jp.oboegaki.core.model.ItemRelation
 import jp.oboegaki.core.model.RecurrenceUnit
+import jp.oboegaki.core.model.ThemeIcons
 
 @Composable
 fun AllItemsScreen(
@@ -111,7 +112,11 @@ private fun androidx.compose.foundation.lazy.LazyListScope.sectionHeader(
             Modifier.fillMaxWidth().clickable { expanded[key] = expanded[key] != true }.padding(vertical = 12.dp, horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(if (expanded[key] == true) "▾" else "▸", style = MaterialTheme.typography.h6)
+            AppIcon(
+                if (expanded[key] == true) AppIcons.collapse else AppIcons.expand,
+                if (expanded[key] == true) "${title}を折りたたむ" else "${title}を展開",
+                modifier = Modifier.size(24.dp),
+            )
             Spacer(Modifier.width(8.dp))
             Text(title, style = MaterialTheme.typography.h6, modifier = Modifier.weight(1f))
             Text("${count}件", style = MaterialTheme.typography.caption, color = parseColor(LocalThemeColors.current.textSecondary))
@@ -220,7 +225,12 @@ private fun AllItemRow(
                     TextButton(
                         onClick = { collapsedGroups[item.id] = collapsedGroups[item.id] != true },
                         modifier = Modifier.size(48.dp),
-                    ) { Text(if (collapsedGroups[item.id] == true) "▸" else "▾") }
+                    ) {
+                        AppIcon(
+                            if (collapsedGroups[item.id] == true) AppIcons.expand else AppIcons.collapse,
+                            if (collapsedGroups[item.id] == true) "グループを展開" else "グループを折りたたむ",
+                        )
+                    }
                 }
                 if (reorderable) {
                     Box(
@@ -238,7 +248,13 @@ private fun AllItemRow(
                             }
                         },
                         contentAlignment = Alignment.Center,
-                    ) { Text(if (item.isGroup) "▣" else LocalAppTheme.current.icons.all, style = MaterialTheme.typography.h6, color = itemKindColor(item)) }
+                    ) {
+                        if (item.isGroup) {
+                            AppIcon(AppIcons.group, "グループ", tint = itemKindColor(item))
+                        } else {
+                            ThemeIcon(LocalAppTheme.current.icons.all, ThemeIcons().all, AppIcons.all, "項目", tint = itemKindColor(item))
+                        }
+                    }
                 } else if (!(item.isGroup && grouped.hasChildren)) {
                     Box(Modifier.size(12.dp).background(itemKindColor(item), shape = androidx.compose.foundation.shape.CircleShape))
                     Spacer(Modifier.width(12.dp))
@@ -248,7 +264,12 @@ private fun AllItemRow(
                     Text(item.title, maxLines = 2, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium)
                     Text(itemSubtitle(item), style = MaterialTheme.typography.caption, color = parseColor(tokens.textSecondary))
                 }
-                TextButton(onClick = { controller.openEdit(item.id) }, modifier = Modifier.height(48.dp)) { Text("${theme.icons.edit} 編集") }
+                TextButton(onClick = { controller.openEdit(item.id) }, modifier = Modifier.height(48.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        ThemeIcon(theme.icons.edit, ThemeIcons().edit, AppIcons.edit, "編集")
+                        Text("編集")
+                    }
+                }
             }
             if (restoreLabel != null && (item.groupId == null || item.isGroup)) {
                 OutlinedButton(

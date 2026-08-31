@@ -1,6 +1,7 @@
 package jp.oboegaki.ui
 
 import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -37,7 +38,6 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
@@ -56,6 +56,7 @@ import androidx.compose.ui.zIndex
 import jp.oboegaki.core.model.AddButtonPosition
 import jp.oboegaki.core.model.AppItem
 import jp.oboegaki.core.model.ItemKind
+import jp.oboegaki.core.model.ThemeIcons
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Instant
 import kotlinx.datetime.TimeZone
@@ -69,6 +70,7 @@ fun TodoScreen(
     items: List<AppItem>,
     focusedIndex: Int,
     hapticsEnabled: Boolean,
+    reducedMotion: Boolean,
     operationGuideSeen: Boolean,
     addButtonPosition: AddButtonPosition,
     addButtonBottomOffsetDp: Int,
@@ -89,6 +91,7 @@ fun TodoScreen(
         onDown = controller::previousTodo,
         onEdit = { controller.openEdit(it.id) },
         hapticsEnabled = hapticsEnabled,
+        reducedMotion = reducedMotion,
         operationGuideSeen = operationGuideSeen,
         addButtonPosition = addButtonPosition,
         addButtonBottomOffsetDp = addButtonBottomOffsetDp,
@@ -100,6 +103,7 @@ fun MemoScreen(
     items: List<AppItem>,
     focusedIndex: Int,
     hapticsEnabled: Boolean,
+    reducedMotion: Boolean,
     operationGuideSeen: Boolean,
     addButtonPosition: AddButtonPosition,
     addButtonBottomOffsetDp: Int,
@@ -120,6 +124,7 @@ fun MemoScreen(
         onDown = controller::previousMemo,
         onEdit = { controller.openEdit(it.id) },
         hapticsEnabled = hapticsEnabled,
+        reducedMotion = reducedMotion,
         operationGuideSeen = operationGuideSeen,
         addButtonPosition = addButtonPosition,
         addButtonBottomOffsetDp = addButtonBottomOffsetDp,
@@ -141,6 +146,7 @@ private fun SwipeDeck(
     onDown: () -> Unit,
     onEdit: (AppItem) -> Unit,
     hapticsEnabled: Boolean,
+    reducedMotion: Boolean,
     operationGuideSeen: Boolean,
     addButtonPosition: AddButtonPosition,
     addButtonBottomOffsetDp: Int,
@@ -162,9 +168,9 @@ private fun SwipeDeck(
     var dragY by remember(item.id) { mutableFloatStateOf(0f) }
     var axis by remember(item.id) { mutableStateOf<DragAxis?>(null) }
     var animating by remember { mutableStateOf(false) }
-    fun performHapticFeedback() {
+    fun performHapticFeedback(intent: AppHapticIntent) {
         if (hapticsEnabled) {
-            hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+            hapticFeedback.performAppHaptic(intent)
         }
     }
 
@@ -181,7 +187,13 @@ private fun SwipeDeck(
         fun settle(result: SwipeResult?, hapticAlreadySent: Boolean = false) {
             if (animating) return
             if (result != null && !hapticAlreadySent) {
-                performHapticFeedback()
+                performHapticFeedback(
+                    if (result == SwipeResult.LEFT || result == SwipeResult.RIGHT) {
+                        AppHapticIntent.CONFIRM
+                    } else {
+                        AppHapticIntent.TICK
+                    },
+                )
             }
             animating = true
             scope.launch {
@@ -197,7 +209,7 @@ private fun SwipeDeck(
                 }
                 val startX = dragX
                 val startY = dragY
-                val baseDuration = if (theme.motionStrength == jp.oboegaki.core.model.MotionStrength.NONE) 1
+                val baseDuration = if (reducedMotion || theme.motionStrength == jp.oboegaki.core.model.MotionStrength.NONE) 1
                 else (180 * theme.animationScale).roundToInt().coerceAtLeast(1)
                 val remainingDistance = when (result) {
                     SwipeResult.RIGHT, SwipeResult.LEFT -> abs(targetX - startX)
@@ -209,7 +221,7 @@ private fun SwipeDeck(
                     SwipeResult.UP, SwipeResult.DOWN -> verticalTransitionPx
                 }
                 val duration = SwipeGesturePhysics.settleDuration(baseDuration, remainingDistance, fullDistance)
-                animate(0f, 1f, animationSpec = tween(duration)) { value, _ ->
+                animate(0f, 1f, animationSpec = tween(duration, easing = LinearEasing)) { value, _ ->
                     dragX = startX + (targetX - startX) * value
                     dragY = startY + (targetY - startY) * value
                 }
@@ -242,6 +254,10 @@ private fun SwipeDeck(
                 rightLabel,
                 leftIcon,
                 rightIcon,
+                leftDefault = if (kind == ItemKind.TODO) ThemeIcons().defer else ThemeIcons().archive,
+                rightDefault = if (kind == ItemKind.TODO) ThemeIcons().complete else ThemeIcons().convert,
+                leftVector = if (kind == ItemKind.TODO) AppIcons.defer else AppIcons.archive,
+                rightVector = if (kind == ItemKind.TODO) AppIcons.complete else AppIcons.convert,
                 compact = operationGuideSeen,
             )
             Spacer(Modifier.height(8.dp))
@@ -263,13 +279,24 @@ private fun SwipeDeck(
             val bottomWidth = if (movingUp) lerpFloat(previewWidth, 1f, verticalProgress) else previewWidth
 
             Box(Modifier.fillMaxWidth().weight(1f).clipToBounds(), contentAlignment = Alignment.Center) {
-                HorizontalGuide(rightLabel, leftLabel, rightIcon, leftIcon, dragX, axis)
+                HorizontalGuide(
+                    rightLabel,
+                    leftLabel,
+                    rightIcon,
+                    leftIcon,
+                    rightDefault = if (kind == ItemKind.TODO) ThemeIcons().complete else ThemeIcons().convert,
+                    leftDefault = if (kind == ItemKind.TODO) ThemeIcons().defer else ThemeIcons().archive,
+                    rightVector = if (kind == ItemKind.TODO) AppIcons.complete else AppIcons.convert,
+                    leftVector = if (kind == ItemKind.TODO) AppIcons.defer else AppIcons.archive,
+                    dragX = dragX,
+                    axis = axis,
+                )
 
                 MorphingDeckCard(
                     item = items.getOrNull(safeIndex - 2),
                     positionLabel = "前のカード",
                     edgeText = "ここが最初です",
-                    directionMark = theme.icons.previous,
+                    isNextPreview = false,
                     height = previewHeight,
                     widthFraction = previewWidth,
                     offsetX = 0f,
@@ -285,7 +312,7 @@ private fun SwipeDeck(
                     item = items.getOrNull(safeIndex + 2),
                     positionLabel = "次のカード",
                     edgeText = "ここが最後です",
-                    directionMark = theme.icons.next,
+                    isNextPreview = true,
                     height = previewHeight,
                     widthFraction = previewWidth,
                     offsetX = 0f,
@@ -301,7 +328,7 @@ private fun SwipeDeck(
                     item = items.getOrNull(safeIndex - 1),
                     positionLabel = "前のカード",
                     edgeText = "ここが最初です",
-                    directionMark = theme.icons.previous,
+                    isNextPreview = false,
                     height = topHeight,
                     widthFraction = topWidth,
                     offsetX = 0f,
@@ -317,7 +344,7 @@ private fun SwipeDeck(
                     item = items.getOrNull(safeIndex + 1),
                     positionLabel = "次のカード",
                     edgeText = "ここが最後です",
-                    directionMark = theme.icons.next,
+                    isNextPreview = true,
                     height = bottomHeight,
                     widthFraction = bottomWidth,
                     offsetX = 0f,
@@ -333,7 +360,7 @@ private fun SwipeDeck(
                     item = item,
                     positionLabel = if (movingDown) "次のカード" else "前のカード",
                     edgeText = "",
-                    directionMark = if (movingDown) theme.icons.next else theme.icons.previous,
+                    isNextPreview = movingDown,
                     height = currentHeight,
                     widthFraction = currentWidth,
                     offsetX = dragX,
@@ -372,7 +399,6 @@ private fun SwipeDeck(
                                 var rawY = 0f
                                 var claimedByCard = false
                                 var gestureHapticSent = false
-                                var blockedHapticSent = false
                                 axis = null
                                 dragX = 0f
                                 dragY = 0f
@@ -402,7 +428,7 @@ private fun SwipeDeck(
                                             dragX = SwipeGesturePhysics.visualOffset(rawX, theme.cardFollow, widthPx * 1.15f)
                                             dragY = 0f
                                             if (!gestureHapticSent && abs(rawX) >= threshold) {
-                                                performHapticFeedback()
+                                                performHapticFeedback(AppHapticIntent.CONFIRM)
                                                 gestureHapticSent = true
                                             }
                                         }
@@ -414,11 +440,11 @@ private fun SwipeDeck(
                                             } else {
                                                 SwipeGesturePhysics.visualOffset(rawY, theme.cardFollow, verticalTransitionPx)
                                             }
-                                            if (blocked && !blockedHapticSent && abs(rawY) >= resistance) {
-                                                performHapticFeedback()
-                                                blockedHapticSent = true
+                                            if (blocked && !gestureHapticSent && abs(rawY) >= resistance) {
+                                                performHapticFeedback(AppHapticIntent.REJECT)
+                                                gestureHapticSent = true
                                             } else if (!blocked && !gestureHapticSent && abs(rawY) >= threshold) {
-                                                performHapticFeedback()
+                                                performHapticFeedback(AppHapticIntent.TICK)
                                                 gestureHapticSent = true
                                             }
                                         }
@@ -470,7 +496,13 @@ private fun SwipeDeck(
                         },
                     )
                     .height(48.dp),
-            ) { Text("${theme.icons.edit} 編集") }
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    ThemeIcon(theme.icons.edit, ThemeIcons().edit, AppIcons.edit, "編集")
+                    Spacer(Modifier.width(4.dp))
+                    Text("編集")
+                }
+            }
         }
     }
 }
@@ -481,6 +513,10 @@ private fun HorizontalGuide(
     leftLabel: String,
     rightIcon: String,
     leftIcon: String,
+    rightDefault: String,
+    leftDefault: String,
+    rightVector: androidx.compose.ui.graphics.vector.ImageVector,
+    leftVector: androidx.compose.ui.graphics.vector.ImageVector,
     dragX: Float,
     axis: DragAxis?,
 ) {
@@ -498,12 +534,17 @@ private fun HorizontalGuide(
             .alpha((abs(dragX) / 120f).coerceIn(.2f, 1f)),
         contentAlignment = if (revealRight) Alignment.CenterStart else Alignment.CenterEnd,
     ) {
-        Text(
-            if (revealRight) "$rightIcon  $rightLabel" else "$leftLabel  $leftIcon",
-            Modifier.padding(20.dp),
-            color = Color.White,
-            fontWeight = FontWeight.Bold,
-        )
+        Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (revealRight) {
+                ThemeIcon(rightIcon, rightDefault, rightVector, rightLabel, tint = Color.White)
+                Spacer(Modifier.width(8.dp))
+                Text(rightLabel, color = Color.White, fontWeight = FontWeight.Bold)
+            } else {
+                Text(leftLabel, color = Color.White, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.width(8.dp))
+                ThemeIcon(leftIcon, leftDefault, leftVector, leftLabel, tint = Color.White)
+            }
+        }
     }
 }
 
@@ -530,7 +571,19 @@ private fun ItemCardContent(item: AppItem) {
                 item.todo?.dueAtEpochMillis?.let { Text("期限  ${formatDateTime(it)}", color = parseColor(tokens.warning)) }
                 item.todo?.estimatedMinutes?.let { Text("約${it}分") }
                 val deferred = item.todo?.deferCount ?: 0
-                if (deferred > 0) Text("${LocalAppTheme.current.icons.defer} ${deferred}回 後で行う", color = parseColor(tokens.defer))
+                if (deferred > 0) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        ThemeIcon(
+                            LocalAppTheme.current.icons.defer,
+                            ThemeIcons().defer,
+                            AppIcons.defer,
+                            "後で行う",
+                            tint = parseColor(tokens.defer),
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text("${deferred}回 後で行う", color = parseColor(tokens.defer))
+                    }
+                }
             }
         }
     }
@@ -541,7 +594,7 @@ private fun MorphingDeckCard(
     item: AppItem?,
     positionLabel: String,
     edgeText: String,
-    directionMark: String,
+    isNextPreview: Boolean,
     height: Dp,
     widthFraction: Float,
     offsetX: Float,
@@ -589,7 +642,7 @@ private fun MorphingDeckCard(
             }
             if (item == null || previewContentAlpha > .01f) {
                 Box(Modifier.fillMaxSize().alpha(if (item == null) 1f else previewContentAlpha)) {
-                    PreviewCardContent(item, positionLabel, edgeText, directionMark, borderColor)
+                    PreviewCardContent(item, positionLabel, edgeText, isNextPreview, borderColor)
                 }
             }
         }
@@ -601,7 +654,7 @@ private fun PreviewCardContent(
     item: AppItem?,
     positionLabel: String,
     edgeText: String,
-    directionMark: String,
+    isNext: Boolean,
     borderColor: Color,
 ) {
     val tokens = LocalThemeColors.current
@@ -619,7 +672,24 @@ private fun PreviewCardContent(
                 maxLines = 1,
             )
         }
-        Text(if (item == null) LocalAppTheme.current.icons.unavailable else directionMark, color = borderColor)
+        if (item == null) {
+            ThemeIcon(
+                LocalAppTheme.current.icons.unavailable,
+                ThemeIcons().unavailable,
+                AppIcons.unavailable,
+                null,
+                tint = borderColor,
+            )
+        } else {
+            val directionMark = if (isNext) LocalAppTheme.current.icons.next else LocalAppTheme.current.icons.previous
+            ThemeIcon(
+                directionMark,
+                if (isNext) ThemeIcons().next else ThemeIcons().previous,
+                if (isNext) AppIcons.next else AppIcons.previous,
+                positionLabel,
+                tint = borderColor,
+            )
+        }
     }
 }
 
@@ -642,6 +712,10 @@ private fun SwipeOperationGuide(
     rightLabel: String,
     leftIcon: String,
     rightIcon: String,
+    leftDefault: String,
+    rightDefault: String,
+    leftVector: androidx.compose.ui.graphics.vector.ImageVector,
+    rightVector: androidx.compose.ui.graphics.vector.ImageVector,
     compact: Boolean,
 ) {
     val tokens = LocalThemeColors.current
@@ -657,14 +731,16 @@ private fun SwipeOperationGuide(
                 Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("$leftIcon $leftLabel", Modifier.weight(1f), style = MaterialTheme.typography.caption)
-                Text(
-                    "${LocalAppTheme.current.icons.next} 次へ  ${LocalAppTheme.current.icons.previous} 前へ",
+                SwipeGuideLabel(leftIcon, leftDefault, leftVector, leftLabel, Modifier.weight(1f))
+                SwipeGuideLabel(
+                    LocalAppTheme.current.icons.next,
+                    ThemeIcons().next,
+                    AppIcons.next,
+                    "次へ",
                     Modifier.weight(1f),
-                    textAlign = TextAlign.Center,
-                    style = MaterialTheme.typography.caption,
+                    centered = true,
                 )
-                Text("$rightLabel $rightIcon", Modifier.weight(1f), textAlign = TextAlign.End, style = MaterialTheme.typography.caption)
+                SwipeGuideLabel(rightIcon, rightDefault, rightVector, rightLabel, Modifier.weight(1f), end = true)
             }
         } else {
             Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 7.dp)) {
@@ -676,11 +752,48 @@ private fun SwipeOperationGuide(
                     color = parseColor(tokens.textSecondary),
                 )
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("$leftIcon $leftLabel", Modifier.weight(1f), style = MaterialTheme.typography.caption)
-                    Text("${LocalAppTheme.current.icons.next} 次へ ・ 前へ ${LocalAppTheme.current.icons.previous}", Modifier.weight(1f), textAlign = TextAlign.Center, style = MaterialTheme.typography.caption)
-                    Text("$rightLabel $rightIcon", Modifier.weight(1f), textAlign = TextAlign.End, style = MaterialTheme.typography.caption)
+                    SwipeGuideLabel(leftIcon, leftDefault, leftVector, leftLabel, Modifier.weight(1f))
+                    Row(Modifier.weight(1f), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                        ThemeIcon(LocalAppTheme.current.icons.next, ThemeIcons().next, AppIcons.next, "次へ")
+                        Text("次へ", style = MaterialTheme.typography.caption)
+                        Text("・", style = MaterialTheme.typography.caption)
+                        Text("前へ", style = MaterialTheme.typography.caption)
+                        ThemeIcon(LocalAppTheme.current.icons.previous, ThemeIcons().previous, AppIcons.previous, "前へ")
+                    }
+                    SwipeGuideLabel(rightIcon, rightDefault, rightVector, rightLabel, Modifier.weight(1f), end = true)
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun SwipeGuideLabel(
+    value: String,
+    defaultValue: String,
+    vector: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    modifier: Modifier,
+    centered: Boolean = false,
+    end: Boolean = false,
+) {
+    Row(
+        modifier,
+        horizontalArrangement = when {
+            centered -> Arrangement.Center
+            end -> Arrangement.End
+            else -> Arrangement.Start
+        },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (!end) {
+            ThemeIcon(value, defaultValue, vector, label)
+            Spacer(Modifier.width(3.dp))
+        }
+        Text(label, style = MaterialTheme.typography.caption)
+        if (end) {
+            Spacer(Modifier.width(3.dp))
+            ThemeIcon(value, defaultValue, vector, label)
         }
     }
 }
@@ -695,7 +808,11 @@ private fun EmptyDeck(kind: ItemKind) {
     ) {
         Text("ここにはまだ${label}がありません", style = MaterialTheme.typography.h6, textAlign = TextAlign.Center)
         Spacer(Modifier.height(8.dp))
-        Text("${LocalAppTheme.current.icons.add} から追加できます", color = parseColor(LocalThemeColors.current.textSecondary))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            ThemeIcon(LocalAppTheme.current.icons.add, ThemeIcons().add, AppIcons.add, "追加", tint = parseColor(LocalThemeColors.current.textSecondary))
+            Spacer(Modifier.width(4.dp))
+            Text("から追加できます", color = parseColor(LocalThemeColors.current.textSecondary))
+        }
     }
 }
 

@@ -3,7 +3,9 @@ package jp.oboegaki.ui
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
@@ -86,6 +88,7 @@ import jp.oboegaki.core.domain.OrderingPolicy
 import jp.oboegaki.core.domain.DatePickerPolicy
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.LocalDateTime
@@ -148,7 +151,14 @@ private fun AddBottomSheet(
         MutableTransitionState(false).apply { targetState = true }
     }
     val sheetInteraction = remember { MutableInteractionSource() }
+    val scope = rememberCoroutineScope()
     val density = LocalDensity.current
+    val theme = LocalAppTheme.current
+    val motionDisabled = settings.reducedMotion ||
+        theme.motionStrength == jp.oboegaki.core.model.MotionStrength.NONE
+    val transitionDuration = if (motionDisabled) 1 else {
+        (220 * theme.animationScale).roundToInt().coerceAtLeast(1)
+    }
     var kind by remember { mutableStateOf(defaultKind) }
     var expanded by remember { mutableStateOf(false) }
     var destinationExpanded by remember { mutableStateOf(false) }
@@ -157,19 +167,28 @@ private fun AddBottomSheet(
     val expandThreshold = with(density) { 36.dp.toPx() }
     val maxDown = with(density) { 140.dp.toPx() }
     val maxUp = with(density) { 48.dp.toPx() }
+    fun closeSheet() {
+        if (!visible.targetState) return
+        visible.targetState = false
+        scope.launch {
+            delay(transitionDuration.toLong())
+            if (!visible.targetState) controller.closeOverlay()
+        }
+    }
     val handleModifier = Modifier.pointerInput(kind, expanded) {
         detectVerticalDragGestures(
             onDragStart = { dragOffset = 0f },
             onDragCancel = { dragOffset = 0f },
             onDragEnd = {
+                val closing = dragOffset >= closeThreshold
                 when {
-                    dragOffset >= closeThreshold -> controller.closeOverlay()
+                    closing -> closeSheet()
                     dragOffset <= -expandThreshold && kind == ItemKind.TODO -> {
                         expanded = true
                         destinationExpanded = true
                     }
                 }
-                dragOffset = 0f
+                if (!closing) dragOffset = 0f
             },
         ) { change, amount ->
             change.consume()
@@ -180,12 +199,19 @@ private fun AddBottomSheet(
         Modifier
             .fillMaxSize()
             .background(Color.Black.copy(alpha = .32f))
-            .clickable(onClick = controller::closeOverlay),
+            .clickable(onClick = ::closeSheet),
         contentAlignment = Alignment.BottomCenter,
     ) {
         AnimatedVisibility(
             visibleState = visible,
-            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+            enter = slideInVertically(
+                animationSpec = tween(transitionDuration, easing = LinearEasing),
+                initialOffsetY = { it },
+            ) + fadeIn(animationSpec = tween(transitionDuration, easing = LinearEasing)),
+            exit = slideOutVertically(
+                animationSpec = tween(transitionDuration, easing = LinearEasing),
+                targetOffsetY = { it },
+            ) + fadeOut(animationSpec = tween(transitionDuration, easing = LinearEasing)),
         ) {
             Surface(
                 modifier = Modifier
@@ -214,6 +240,7 @@ private fun AddBottomSheet(
                     destinationExpanded = destinationExpanded,
                     onDestinationExpandedChange = { destinationExpanded = it },
                     handleModifier = handleModifier,
+                    onClose = ::closeSheet,
                     sections = sections,
                     settings = settings,
                     controller = controller,
@@ -258,6 +285,7 @@ private fun AddScreen(
     destinationExpanded: Boolean,
     onDestinationExpandedChange: (Boolean) -> Unit,
     handleModifier: Modifier,
+    onClose: () -> Unit,
     sections: AllSections,
     settings: AppSettings,
     controller: AppController,
@@ -355,7 +383,7 @@ private fun AddScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text("追加", style = MaterialTheme.typography.h6, modifier = Modifier.weight(1f).padding(start = 10.dp))
-            TextButton(onClick = controller::closeOverlay, modifier = Modifier.height(48.dp)) { Text("閉じる") }
+            TextButton(onClick = onClose, modifier = Modifier.height(48.dp)) { Text("閉じる") }
         }
         Divider()
         LazyColumn(

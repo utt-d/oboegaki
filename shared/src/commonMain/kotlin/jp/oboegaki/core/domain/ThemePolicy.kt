@@ -24,7 +24,7 @@ object ThemePolicy {
             return ThemeValidation.Invalid("対応していないフォントです")
         }
         if (allIcons(theme.icons).any { it.isBlank() || it.length > 8 }) {
-            return ThemeValidation.Invalid("アイコンは1〜4文字程度で入力してください")
+            return ThemeValidation.Invalid("アイコンは空欄にせず、8文字以内で入力してください（絵文字は2文字分になる場合があります）")
         }
         if (theme.fontScale !in .85f..1.30f || theme.spacingScale !in .80f..1.25f) {
             return ThemeValidation.Invalid("文字または余白の値が許可範囲外です")

@@ -8,6 +8,7 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.offset
@@ -41,7 +42,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -56,6 +56,7 @@ import jp.oboegaki.core.model.AllSections
 import jp.oboegaki.core.model.AppSettings
 import jp.oboegaki.core.model.MainNavigationButton
 import jp.oboegaki.core.model.TopActionButton
+import jp.oboegaki.core.model.ThemeIcons
 import jp.oboegaki.platform.CalendarExporter
 import jp.oboegaki.platform.NoOpCalendarExporter
 import jp.oboegaki.platform.BackupFileGateway
@@ -123,7 +124,7 @@ fun OboegakiApp(
 
     fun performHapticFeedback() {
         if (settings.hapticsEnabled) {
-            hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+            hapticFeedback.performAppHaptic(AppHapticIntent.TICK)
         }
     }
 
@@ -240,10 +241,16 @@ fun OboegakiApp(
                                 ).forEach { button ->
                                     when (button) {
                                         TopActionButton.THEMES -> TextButton(onClick = controller::openThemes) {
-                                            Text("${icons.theme} テーマ")
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                ThemeIcon(icons.theme, ThemeIcons().theme, AppIcons.theme, "テーマ")
+                                                Text("テーマ")
+                                            }
                                         }
                                         TopActionButton.SETTINGS -> TextButton(onClick = controller::openSettings) {
-                                            Text("${icons.settings} 設定")
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                ThemeIcon(icons.settings, ThemeIcons().settings, AppIcons.settings, "設定")
+                                                Text("設定")
+                                            }
                                         }
                                     }
                                 }
@@ -265,13 +272,19 @@ fun OboegakiApp(
                         ).forEach { button ->
                             when (button) {
                                 MainNavigationButton.TODOS -> BottomNavItem(
-                                    "やること", icons.todo, tab == MainTab.TODOS,
+                                    "やること",
+                                    { ThemeIcon(icons.todo, ThemeIcons().todo, AppIcons.todo, "やること") },
+                                    tab == MainTab.TODOS,
                                 ) { animateToTab(MainTab.TODOS) }
                                 MainNavigationButton.MEMOS -> BottomNavItem(
-                                    "メモ", icons.memo, tab == MainTab.MEMOS,
+                                    "メモ",
+                                    { ThemeIcon(icons.memo, ThemeIcons().memo, AppIcons.memo, "メモ") },
+                                    tab == MainTab.MEMOS,
                                 ) { animateToTab(MainTab.MEMOS) }
                                 MainNavigationButton.ALL -> BottomNavItem(
-                                    "すべて", icons.all, tab == MainTab.ALL,
+                                    "すべて",
+                                    { ThemeIcon(icons.all, ThemeIcons().all, AppIcons.all, "すべて") },
+                                    tab == MainTab.ALL,
                                 ) { animateToTab(MainTab.ALL) }
                             }
                         }
@@ -283,7 +296,7 @@ fun OboegakiApp(
                         modifier = Modifier.padding(bottom = settings.addButtonBottomOffsetDp.coerceIn(0, 160).dp),
                         shape = CircleShape,
                     ) {
-                        Text(icons.add, style = MaterialTheme.typography.h5)
+                        ThemeIcon(icons.add, ThemeIcons().add, AppIcons.add, "追加", tint = MaterialTheme.colors.onPrimary)
                     }
                 },
                 floatingActionButtonPosition = when (settings.addButtonPosition) {
@@ -391,6 +404,7 @@ private fun TabScreen(
             sections.todos,
             todoIndex,
             settings.hapticsEnabled,
+            settings.reducedMotion,
             settings.operationGuideSeen,
             settings.addButtonPosition,
             settings.addButtonBottomOffsetDp,
@@ -400,6 +414,7 @@ private fun TabScreen(
             sections.memos,
             memoIndex,
             settings.hapticsEnabled,
+            settings.reducedMotion,
             settings.operationGuideSeen,
             settings.addButtonPosition,
             settings.addButtonBottomOffsetDp,
@@ -524,14 +539,14 @@ internal fun adjacentNavigationTab(
 @Composable
 private fun androidx.compose.foundation.layout.RowScope.BottomNavItem(
     label: String,
-    icon: String,
+    icon: @Composable () -> Unit,
     selected: Boolean,
     onClick: () -> Unit,
 ) {
     BottomNavigationItem(
         selected = selected,
         onClick = onClick,
-        icon = { Text(icon, color = if (selected) MaterialTheme.colors.primary else MaterialTheme.colors.onSurface.copy(alpha = .62f)) },
+        icon = icon,
         label = { Text(label) },
         alwaysShowLabel = true,
     )
