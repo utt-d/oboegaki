@@ -30,7 +30,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.key
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -99,21 +98,22 @@ fun OboegakiApp(
         theme.motionStrength == jp.oboegaki.core.model.MotionStrength.NONE
     val tabTransitionDuration = MotionAnimation.duration(220, theme.animationScale, motionDisabled)
     val hapticFeedback = LocalHapticFeedback.current
-    var tabOffset by remember { mutableFloatStateOf(0f) }
+    var tabTransitionState by remember { mutableStateOf(TabTransitionRenderState(tab)) }
     var tabViewportWidth by remember { mutableIntStateOf(0) }
     var tabTransitionJob by remember { mutableStateOf<Job?>(null) }
-    var tabTransitionGeneration by remember { mutableIntStateOf(0) }
 
     fun cancelTabTransition() {
-        tabTransitionGeneration += 1
         tabTransitionJob?.cancel()
         tabTransitionJob = null
+        tabTransitionState = tabTransitionState.invalidate(latestTabState.value)
     }
 
     LaunchedEffect(tab, tabOrder) {
-        if (tabTransitionJob != null) {
+        if (
+            tabTransitionState.anchorTab != tab ||
+            tabTransitionState.phase != TabTransitionPhase.IDLE
+        ) {
             cancelTabTransition()
-            tabOffset = 0f
         }
     }
 
@@ -132,37 +132,54 @@ fun OboegakiApp(
     }
 
     fun animateToTab(target: MainTab) {
-        if (target == tab) return
+        if (target == tab && tabTransitionState.phase == TabTransitionPhase.IDLE) return
+        if (tabTransitionState.phase != TabTransitionPhase.IDLE) {
+            cancelTabTransition()
+        }
+        val source = latestTabState.value
+        if (target == source) return
         if (tabViewportWidth <= 0) {
+            tabTransitionState = tabTransitionState.invalidate(target)
             controller.selectTab(target)
             return
         }
-        val source = tab
         val sourceIndex = tabOrder.indexOf(source)
         val targetIndex = tabOrder.indexOf(target)
         val sourceOrder = tabOrder
-        cancelTabTransition()
-        val generation = tabTransitionGeneration
+        val transition = tabTransitionState.beginProgrammatic(source, target) ?: return
+        val generation = transition.generation
+        tabTransitionState = transition
         tabTransitionJob = scope.launch {
             try {
                 val targetOffset = -(targetIndex - sourceIndex) * tabViewportWidth.toFloat()
-                val startOffset = tabOffset
+                val startOffset = tabTransitionState.offsetPx
                 val distance = abs(targetOffset - startOffset)
                 animate(
                     initialValue = startOffset,
                     targetValue = targetOffset,
                     animationSpec = tween(transitionDuration(distance), easing = MotionAnimation.settleEasing),
-                ) { value, _ -> tabOffset = value }
+                ) { value, _ ->
+                    tabTransitionState.updateSettle(source, generation, value)?.let {
+                        tabTransitionState = it
+                    }
+                }
                 if (
-                    generation != tabTransitionGeneration ||
+                    generation != tabTransitionState.generation ||
                     source != latestTabState.value ||
-                    sourceOrder != latestTabOrderState.value
-                ) return@launch
+                    sourceOrder != latestTabOrderState.value ||
+                    tabTransitionState.targetTab != target
+                ) {
+                    if (generation == tabTransitionState.generation) {
+                        tabTransitionState = tabTransitionState.invalidate(latestTabState.value)
+                    }
+                    return@launch
+                }
+                val committed = tabTransitionState.commit(source, generation, target) ?: return@launch
+                tabTransitionState = committed
                 controller.selectTab(target)
-                tabOffset = 0f
                 performHapticFeedback()
             } finally {
-                if (generation == tabTransitionGeneration) {
+                if (generation == tabTransitionState.generation) {
                     tabTransitionJob = null
                 }
             }
@@ -171,37 +188,50 @@ fun OboegakiApp(
 
     fun settleTabSwipe(source: MainTab, sourceOrder: List<MainTab>, distance: Float) {
         if (source != latestTabState.value || sourceOrder != latestTabOrderState.value) {
-            tabOffset = 0f
+            cancelTabTransition()
             return
         }
         val direction = if (distance < 0f) 1 else -1
         val target = if (abs(distance) >= tabSwipeThreshold) {
             adjacentNavigationTab(source, direction, sourceOrder) ?: source
         } else source
-        cancelTabTransition()
-        val generation = tabTransitionGeneration
+        val generation = tabTransitionState.generation
+        val settling = tabTransitionState.beginSettle(source, generation, target) ?: return
+        val startOffset = tabTransitionState.offsetPx
+        tabTransitionState = settling
         tabTransitionJob = scope.launch {
             try {
                 val targetOffset = if (target == source) 0f else -direction * tabViewportWidth.toFloat()
-                val startOffset = tabOffset
                 val remaining = abs(targetOffset - startOffset)
                 animate(
                     initialValue = startOffset,
                     targetValue = targetOffset,
                     animationSpec = tween(transitionDuration(remaining), easing = MotionAnimation.settleEasing),
-                ) { value, _ -> tabOffset = value }
+                ) { value, _ ->
+                    tabTransitionState.updateSettle(source, generation, value)?.let {
+                        tabTransitionState = it
+                    }
+                }
                 if (
-                    generation != tabTransitionGeneration ||
+                    generation != tabTransitionState.generation ||
                     source != latestTabState.value ||
-                    sourceOrder != latestTabOrderState.value
-                ) return@launch
+                    sourceOrder != latestTabOrderState.value ||
+                    tabTransitionState.targetTab != target
+                ) {
+                    if (generation == tabTransitionState.generation) {
+                        tabTransitionState = tabTransitionState.invalidate(latestTabState.value)
+                    }
+                    return@launch
+                }
                 if (target != source) {
+                    tabTransitionState = tabTransitionState.commit(source, generation, target) ?: return@launch
                     controller.selectTab(target)
                     performHapticFeedback()
+                } else {
+                    tabTransitionState = tabTransitionState.commit(source, generation, target) ?: return@launch
                 }
-                tabOffset = 0f
             } finally {
-                if (generation == tabTransitionGeneration) {
+                if (generation == tabTransitionState.generation) {
                     tabTransitionJob = null
                 }
             }
@@ -316,7 +346,9 @@ fun OboegakiApp(
                             allowChildConsumption = tab == MainTab.ALL,
                             onStart = { _, _ ->
                                 cancelTabTransition()
-                                tabOffset = 0f
+                                tabTransitionState.beginDrag(tab)?.let {
+                                    tabTransitionState = it
+                                }
                             },
                             onDrag = { source, sourceOrder, distance ->
                                 val minimum = if (adjacentNavigationTab(source, 1, sourceOrder) != null) {
@@ -325,14 +357,19 @@ fun OboegakiApp(
                                 val maximum = if (adjacentNavigationTab(source, -1, sourceOrder) != null) {
                                     tabViewportWidth.toFloat()
                                 } else 0f
-                                tabOffset = distance.coerceIn(minimum, maximum)
+                                tabTransitionState.updateDrag(
+                                    source,
+                                    tabTransitionState.generation,
+                                    distance.coerceIn(minimum, maximum),
+                                )?.let {
+                                    tabTransitionState = it
+                                }
                             },
                             onEnd = { source, sourceOrder, distance ->
                                 settleTabSwipe(source, sourceOrder, distance)
                             },
                             onCancel = { _, _ ->
                                 cancelTabTransition()
-                                tabOffset = 0f
                             },
                         )
                 ) {
@@ -341,13 +378,13 @@ fun OboegakiApp(
                     } else {
                         tabOrder.forEachIndexed { pageIndex, pageTab ->
                             key(pageTab) {
-                                val pageBaseOffset = (pageIndex - tabOrder.indexOf(tab)) * tabViewportWidth
+                                val renderState = tabTransitionState
                                 Box(
                                     Modifier
                                         .fillMaxSize()
                                         .offset {
                                             IntOffset(
-                                                x = pageBaseOffset + tabOffset.roundToInt(),
+                                                x = tabPageOffset(pageIndex, tabOrder, renderState, tabViewportWidth),
                                                 y = 0,
                                             )
                                         },
